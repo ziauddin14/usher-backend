@@ -1,7 +1,9 @@
-// pnpm seed            → idempotent demo seed into MONGODB_URI
-// pnpm seed --reset    → wipe demo collections first (needs SEED_CONFIRM=ushr_demo unless the DB is local)
-import { disconnectDb } from '../src/lib/db.js';
+// pnpm seed             → idempotent demo seed into MONGODB_URI
+// pnpm seed --if-empty  → seed only when the database has no users yet (start-local.ps1)
+// pnpm seed --reset     → wipe demo collections first (needs SEED_CONFIRM=ushr_demo unless the DB is local)
+import { connectDb, disconnectDb } from '../src/lib/db.js';
 import { env } from '../src/lib/env.js';
+import { User } from '../src/models/user.js';
 import { seedDemo } from '../src/seed/seed.js';
 
 function isLocal(uri: string): boolean {
@@ -10,10 +12,20 @@ function isLocal(uri: string): boolean {
 
 async function main(): Promise<void> {
   const reset = process.argv.includes('--reset');
+  const ifEmpty = process.argv.includes('--if-empty');
   const uri = env().MONGODB_URI;
   if (reset && !isLocal(uri) && process.env.SEED_CONFIRM !== 'ushr_demo') {
     console.error('Refusing --reset on a non-local database without SEED_CONFIRM=ushr_demo.');
     process.exit(1);
+  }
+  if (ifEmpty && !reset) {
+    await connectDb();
+    const users = await User.estimatedDocumentCount();
+    if (users > 0) {
+      console.warn(`Database already has ${users} users — seed skipped.`);
+      await disconnectDb();
+      return;
+    }
   }
   const result = await seedDemo({ reset });
   console.warn(
