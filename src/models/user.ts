@@ -20,6 +20,10 @@ const userSchema = new Schema(
     ajeerCode: { type: String, required: true, unique: true, match: /^\d+$/ },
     name: { type: String, required: true },
     nameUr: { type: String },
+    /** Walid (father's name) from the employee list. */
+    fatherName: { type: String },
+    /** Registered mobile, normalized 03XXXXXXXXX — checked on first login and forgot-password. */
+    mobile: { type: String, match: /^03\d{9}$/ },
     role: { type: String, enum: ROLES, required: true },
     zimmedari: { type: String, enum: ZIMMEDARI },
     unitCode: { type: String, required: true },

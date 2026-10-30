@@ -4,6 +4,7 @@ import { clearSettingsCache } from '../lib/settings.js';
 import { villageNameKey } from '../lib/text.js';
 import { AuditLog } from '../models/audit-log.js';
 import { Jadwal } from '../models/jadwal.js';
+import { PasswordResetRequest } from '../models/password-reset-request.js';
 import { Setting } from '../models/setting.js';
 import { Unit } from '../models/unit.js';
 import { User } from '../models/user.js';
@@ -19,7 +20,10 @@ import {
   type SeedUser,
 } from './data.js';
 
-const ALL_MODELS = [Unit, User, Village, Jadwal, Setting, AuditLog] as const;
+const ALL_MODELS = [Unit, User, Village, Jadwal, Setting, AuditLog, PasswordResetRequest] as const;
+
+/** Invented demo mobile (CLAUDE.md rule 11) so reset / forgot-password can be tried on demo users. */
+const DEMO_MOBILE = '03000000000';
 
 const LIVE_STATUSES: ('approved' | 'pending')[] = ['approved', 'pending'];
 
@@ -44,6 +48,7 @@ export async function seedDemo({ reset = false } = {}): Promise<SeedResult> {
       Jadwal.deleteMany(),
       Setting.deleteMany(),
       AuditLog.deleteMany(),
+      PasswordResetRequest.deleteMany(),
     ]);
     clearSettingsCache();
   }
@@ -78,7 +83,13 @@ export async function seedDemo({ reset = false } = {}): Promise<SeedResult> {
       updateOne: {
         filter: { ajeerCode: u.ajeerCode },
         update: {
-          $set: { ...u, unitPath: paths.get(u.unitCode)!, isDemo: true, isActive: true },
+          $set: {
+            ...u,
+            unitPath: paths.get(u.unitCode)!,
+            mobile: DEMO_MOBILE,
+            isDemo: true,
+            isActive: true,
+          },
           // Forced password change is disabled for demo users (scope §6).
           $setOnInsert: { passwordHash, mustChangePassword: false },
         },

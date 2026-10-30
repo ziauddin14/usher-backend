@@ -72,8 +72,26 @@ function verify(token: string): TokenPayload | null {
   }
 }
 
-/** 401 unless a valid session belongs to an active user; sets `req.user`. */
+/**
+ * 401 unless a valid session belongs to an active user; sets `req.user`.
+ * While a password change is pending (first login / after a reset) every other endpoint
+ * answers 403 PASSWORD_CHANGE_REQUIRED — only `requireSession` routes stay open.
+ */
 export const requireAuth: RequestHandler = async (req, _res, next) => {
+  await loadSessionUser(req);
+  if (req.user?.mustChangePassword) {
+    throw new AppError(403, 'PASSWORD_CHANGE_REQUIRED', 'Change your password first');
+  }
+  next();
+};
+
+/** Like requireAuth but also allowed while a password change is pending (me, change-password). */
+export const requireSession: RequestHandler = async (req, _res, next) => {
+  await loadSessionUser(req);
+  next();
+};
+
+async function loadSessionUser(req: Request): Promise<void> {
   const token = readToken(req);
   const payload = token ? verify(token) : null;
   if (!payload || !Types.ObjectId.isValid(payload.sub)) {
@@ -97,8 +115,7 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
     unitPath: user.unitPath,
     mustChangePassword: user.mustChangePassword,
   };
-  next();
-};
+}
 
 /** 403 unless the caller has one of the roles. Use after `requireAuth`. */
 export function requireRole(...roles: Role[]): RequestHandler {
