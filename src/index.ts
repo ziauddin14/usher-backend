@@ -7,8 +7,10 @@ import { env } from './lib/env.js';
 import { errorHandler, notFoundHandler } from './lib/errors.js';
 import { authRouter } from './modules/auth/routes.js';
 import { healthRouter } from './modules/health/routes.js';
+import { jadwalsRouter } from './modules/jadwals/routes.js';
 import { metaRouter } from './modules/meta/routes.js';
 import { usersRouter } from './modules/users/routes.js';
+import { villagesRouter } from './modules/villages/routes.js';
 
 /** CORS only for ALLOWED_ORIGIN (the browser normally reaches us through the Next.js rewrite). */
 const cors: RequestHandler = (req, res, next) => {
@@ -41,6 +43,8 @@ export function createApp(): Express {
   api.use('/meta', metaRouter());
   api.use('/auth', authRouter());
   api.use('/users', usersRouter());
+  api.use('/villages', villagesRouter());
+  api.use('/jadwals', jadwalsRouter());
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);
