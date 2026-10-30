@@ -1,0 +1,175 @@
+// Builds a throw-away Excel file with invented rows in the OS temp folder (never in the repo).
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import bcrypt from 'bcryptjs';
+import ExcelJS from 'exceljs';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Unit } from '../../models/unit.js';
+import { User } from '../../models/user.js';
+import { seedDemo } from '../../seed/seed.js';
+import { importEmployees, readEmployeeSheet, validateRows } from './employees.js';
+
+const HEADER = [
+  'Ajeer Code',
+  'Naam',
+  'Walid',
+  'Zimmedari',
+  'Suba',
+  'Division',
+  'District',
+  'Mobile',
+];
+
+let dir: string;
+let file: string;
+
+async function writeSheet(rows: (string | number)[][]): Promise<string> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Employees');
+  ws.addRow(['Ushar Zimmedaran list (test)']); // a title row above the header is fine
+  ws.addRow(HEADER);
+  for (const r of rows) ws.addRow(r);
+  const path = join(dir, `employees-${rows.length}.xlsx`);
+  await wb.xlsx.writeFile(path);
+  return path;
+}
+
+describe('employee import', () => {
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'ushr-import-'));
+    await seedDemo({ reset: true });
+    await User.create({
+      ajeerCode: '880007',
+      name: 'Existing Zimmedar',
+      role: 'zimmedar',
+      zimmedari: 'ushar',
+      unitCode: 'GHOTKI',
+      unitPath: 'PK/INT_SINDH/SUKKUR/GHOTKI',
+      passwordHash: 'existing-hash',
+      mustChangePassword: false,
+      isDemo: false,
+    });
+    file = await writeSheet([
+      // new zimmedar in an existing district (name written with "District")
+      [
+        880001,
+        'Test Zimmedar One',
+        'Test Walid',
+        'Ushar',
+        'Interior Sindh',
+        'Sukkur Division',
+        'Ghotki District',
+        '0300-1112233',
+      ],
+      // new tehsil-town zimmedar in a brand new suba / division / district
+      [
+        880002,
+        'ٹیسٹ ذمہ دار',
+        'ٹیسٹ والد',
+        'Tehsil-Town',
+        'Balochistan',
+        'Quetta',
+        'Quetta',
+        3001112244,
+      ],
+      // new district zimmedar of a new district under an existing division
+      [
+        880003,
+        'Test District Head',
+        '',
+        'District',
+        'Interior Sindh',
+        'Sukkur',
+        'Rohri',
+        '03001112255',
+      ],
+      // existing non-demo zimmedar: data updated, password kept
+      [880007, 'Renamed Zimmedar', '', 'Event', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
+      // errors
+      ['ABC', 'Bad Code', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
+      [880004, 'Bad Role', '', 'Manager', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
+      [880005, 'No District', '', 'Ushar', 'Interior Sindh', 'Sukkur', '', ''],
+      [880006, 'Bad Mobile', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', '12345'],
+      [880001, 'Duplicate', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
+      [90412, 'Real Person', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
+    ]);
+  });
+
+  afterAll(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('reads the header row and cell text', async () => {
+    const rows = await readEmployeeSheet(file);
+    expect(rows).toHaveLength(10);
+    expect(rows[0]).toMatchObject({ row: 3, values: { ajeerCode: '880001', zimmedari: 'Ushar' } });
+  });
+
+  it('reports every bad row with its row number', async () => {
+    const plan = validateRows(await readEmployeeSheet(file));
+    expect(plan.errors.map((e) => e.row)).toEqual([7, 8, 9, 10, 11]);
+    expect(plan.errors.find((e) => e.row === 8)?.message).toMatch(/Zimmedari/);
+    expect(plan.errors.find((e) => e.row === 11)?.message).toMatch(/twice/);
+    expect(plan.warnings.map((w) => w.ajeerCode)).toEqual(['880007', '90412']); // no mobile
+  });
+
+  it('--dry-run writes nothing', async () => {
+    const before = { users: await User.countDocuments(), units: await Unit.countDocuments() };
+    const result = await importEmployees(await readEmployeeSheet(file), { dryRun: true });
+    expect(result).toMatchObject({ dryRun: true, created: 3, updated: 1 });
+    expect(result.newUnits.map((u) => u.path)).toEqual([
+      'PK/BALOCHISTAN',
+      'PK/BALOCHISTAN/QUETTA',
+      'PK/BALOCHISTAN/QUETTA/QUETTA_DIST',
+      'PK/INT_SINDH/SUKKUR/ROHRI',
+    ]);
+    expect(await User.countDocuments()).toBe(before.users);
+    expect(await Unit.countDocuments()).toBe(before.units);
+  });
+
+  it('imports: new users get password 123 + forced change; existing passwords stay', async () => {
+    const before = await User.findOne({ ajeerCode: '880007' }).select('+passwordHash').lean();
+    const result = await importEmployees(await readEmployeeSheet(file), { dryRun: false });
+    expect(result).toMatchObject({ created: 3, updated: 1 });
+    expect(result.errors.find((e) => e.ajeerCode === '90412')?.message).toMatch(/demo user/);
+
+    const one = await User.findOne({ ajeerCode: '880001' }).select('+passwordHash').lean();
+    expect(one).toMatchObject({
+      role: 'zimmedar',
+      zimmedari: 'ushar',
+      unitCode: 'GHOTKI',
+      unitPath: 'PK/INT_SINDH/SUKKUR/GHOTKI',
+      fatherName: 'Test Walid',
+      mobile: '03001112233',
+      mustChangePassword: true,
+      isDemo: false,
+    });
+    expect(await bcrypt.compare('123', one!.passwordHash)).toBe(true);
+
+    const urdu = await User.findOne({ ajeerCode: '880002' }).lean();
+    expect(urdu).toMatchObject({
+      nameUr: 'ٹیسٹ ذمہ دار',
+      zimmedari: 'tehsil_town',
+      mobile: '03001112244',
+    });
+    expect(urdu?.unitPath).toBe('PK/BALOCHISTAN/QUETTA/QUETTA_DIST');
+
+    const head = await User.findOne({ ajeerCode: '880003' }).lean();
+    expect(head).toMatchObject({ role: 'district', unitCode: 'ROHRI' });
+    expect(head?.zimmedari).toBeUndefined();
+
+    const after = await User.findOne({ ajeerCode: '880007' }).select('+passwordHash').lean();
+    expect(after).toMatchObject({ name: 'Renamed Zimmedar', zimmedari: 'event' });
+    expect(after?.passwordHash).toBe(before?.passwordHash);
+    expect(after?.mustChangePassword).toBe(before?.mustChangePassword);
+
+    const demo = await User.findOne({ ajeerCode: '90412' }).lean();
+    expect(demo?.name).toBe('Muhammad Arif');
+  });
+
+  it('is idempotent: a second run updates, creates nothing new', async () => {
+    const result = await importEmployees(await readEmployeeSheet(file), { dryRun: false });
+    expect(result).toMatchObject({ created: 0, updated: 4, newUnits: [] });
+  });
+});
