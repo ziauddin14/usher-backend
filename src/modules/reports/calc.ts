@@ -113,7 +113,7 @@ export function computeDayTotals(jadwal: JadwalInput, categories: CategoryRule[]
   totals.excludedWusooli = totals.wusooli - totals.rewardWusooli;
 
   const travel = jadwal.travel;
-  if (travel?.mode === 'bike' && travel.meterStart != null && travel.meterEnd != null) {
+  if (travel?.mode === 'bike' && typeof travel.meterStart === 'number' && typeof travel.meterEnd === 'number') {
     totals.km = Math.max(0, travel.meterEnd - travel.meterStart);
   }
   if (travel?.mode === 'bus') totals.fare = n(travel.fare);
