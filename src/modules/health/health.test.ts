@@ -21,7 +21,7 @@ describe('health & meta', () => {
   });
 
   it('GET /meta returns the seeded rules and today in Karachi', async () => {
-    const cookie = await loginCookie(app, '90412');
+    const cookie = await loginCookie(app, '9090412');
     const res = await request(app).get('/api/v1/meta').set('Cookie', cookie).expect(200);
     expect(res.body.today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(res.body.backdateDays).toBe(3);

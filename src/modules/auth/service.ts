@@ -4,7 +4,7 @@ import { audit } from '../../lib/audit.js';
 import type { AuthUser } from '../../lib/auth.js';
 import { connectDb } from '../../lib/db.js';
 import { AppError } from '../../lib/errors.js';
-import { normalizeMobile } from '../../lib/mobile.js';
+import { maskMobile, normalizeMobile } from '../../lib/mobile.js';
 import { PasswordResetRequest } from '../../models/password-reset-request.js';
 import { Unit } from '../../models/unit.js';
 import { User } from '../../models/user.js';
@@ -78,14 +78,33 @@ export async function login(
     throw new AppError(403, 'ACCOUNT_INACTIVE', 'This account is not active');
   }
   if (user.mustChangePassword) {
-    if (!user.mobile) {
-      await failed('no_registered_mobile');
-      throw new AppError(403, 'MOBILE_NOT_REGISTERED', 'No mobile number registered for this user');
-    }
     if (!mobile) {
       throw new AppError(401, 'MOBILE_REQUIRED', 'Enter your registered mobile number');
     }
-    if (normalizeMobile(mobile) !== user.mobile) {
+    const typed = normalizeMobile(mobile);
+    if (!typed) {
+      throw new AppError(
+        400,
+        'VALIDATION_FAILED',
+        'Mobile is not a valid Pakistani mobile number',
+        {
+          field: 'mobile',
+        },
+      );
+    }
+    if (!user.mobile) {
+      // No number on record: keep the one the user typed, "tasdeeq baqi" until the District confirms.
+      await User.updateOne({ _id: user._id }, { $set: { mobile: typed, mobileVerified: false } });
+      await audit({
+        action: 'MOBILE_SELF_REGISTER',
+        actorId: String(user._id),
+        actorAjeerCode: user.ajeerCode,
+        targetType: 'user',
+        targetId: String(user._id),
+        unitPath: user.unitPath,
+        details: { mobile: maskMobile(typed) },
+      });
+    } else if (typed !== user.mobile) {
       await failed('mobile_mismatch');
       throw new AppError(401, 'MOBILE_MISMATCH', 'Mobile number does not match');
     }

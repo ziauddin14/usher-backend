@@ -1,6 +1,7 @@
 import { Setting, type SettingDoc } from '../models/setting.js';
 import { connectDb } from './db.js';
 import { AppError } from './errors.js';
+import { DEFAULT_SETTINGS } from '../modules/settings/defaults.js';
 
 const TTL_MS = 60_000;
 
@@ -20,4 +21,11 @@ export async function getSettings(): Promise<SettingDoc> {
 
 export function clearSettingsCache(): void {
   cache = undefined;
+}
+
+/** Insert the default settings when the database has none (the live database gets no seed). */
+export async function ensureSettings(): Promise<void> {
+  await connectDb();
+  await Setting.updateOne({ _id: 'app' }, { $setOnInsert: DEFAULT_SETTINGS }, { upsert: true });
+  clearSettingsCache();
 }

@@ -26,36 +26,69 @@ function login(body: Record<string, string>) {
 }
 
 describe('first login with the initial password 123', () => {
+  let noMobile = ''; // a Ghotki zimmedar, so the demo district 9040001 can confirm the number
   beforeAll(async () => {
     await seedDemo({ reset: true });
-    await makeNewUser('90001', '03001112233');
-    await makeNewUser('90002');
+    await makeNewUser('9000001', '03001112233');
+    noMobile = (await User.findOne({
+      unitCode: 'GHOTKI',
+      role: 'zimmedar',
+      ajeerCode: { $ne: '9090412' },
+    }).lean())!.ajeerCode;
+    await makeNewUser(noMobile);
   });
 
   it('asks for the registered mobile, without counting it as a failed login', async () => {
     for (let i = 0; i < 6; i += 1) {
-      const res = await login({ ajeerCode: '90001', password: '123' }).expect(401);
+      const res = await login({ ajeerCode: '9000001', password: '123' }).expect(401);
       expect(res.body.error.code).toBe('MOBILE_REQUIRED');
     }
   });
 
   it('rejects a mobile that does not match', async () => {
-    const res = await login({ ajeerCode: '90001', password: '123', mobile: '03009999999' }).expect(
-      401,
-    );
+    const res = await login({
+      ajeerCode: '9000001',
+      password: '123',
+      mobile: '03009999999',
+    }).expect(401);
     expect(res.body.error.code).toBe('MOBILE_MISMATCH');
   });
 
-  it('refuses users without a registered mobile', async () => {
-    const res = await login({ ajeerCode: '90002', password: '123', mobile: '03001112233' }).expect(
-      403,
+  it('without a number on record, keeps the typed one as "tasdeeq baqi" for the District', async () => {
+    const bad = await login({ ajeerCode: noMobile, password: '123', mobile: '12345' }).expect(400);
+    expect(bad.body.error.details.field).toBe('mobile');
+
+    await login({ ajeerCode: noMobile, password: '123', mobile: '0301 2223344' }).expect(200);
+    const saved = await User.findOne({ ajeerCode: noMobile }).lean();
+    expect(saved).toMatchObject({ mobile: '03012223344', mobileVerified: false });
+    expect(
+      await AuditLog.countDocuments({ action: 'MOBILE_SELF_REGISTER', actorAjeerCode: noMobile }),
+    ).toBe(1);
+    // From now on that number is the one checked.
+    const other = await login({ ajeerCode: noMobile, password: '123', mobile: '03009999999' });
+    expect(other.status).toBe(401);
+
+    // The District sees it as unverified and confirms it (audited).
+    const district = await loginCookie(app, '9040001');
+    const list = await request(app)
+      .get('/api/v1/users?mobileStatus=unverified')
+      .set('Cookie', district)
+      .expect(200);
+    const row = (list.body.users as { id: string; ajeerCode: string; mobileStatus: string }[]).find(
+      (u) => u.ajeerCode === noMobile,
     );
-    expect(res.body.error.code).toBe('MOBILE_NOT_REGISTERED');
+    expect(row?.mobileStatus).toBe('unverified');
+    await request(app)
+      .post(`/api/v1/users/${row!.id}/confirm-mobile`)
+      .set('Cookie', district)
+      .expect(200);
+    expect((await User.findOne({ ajeerCode: noMobile }).lean())?.mobileVerified).toBe(true);
+    expect(await AuditLog.countDocuments({ action: 'MOBILE_CONFIRM' })).toBe(1);
   });
 
   it('logs in when the mobile matches (any common format) and forces a password change', async () => {
     const res = await login({
-      ajeerCode: '90001',
+      ajeerCode: '9000001',
       password: '123',
       mobile: '+92 300-1112233',
     }).expect(200);
@@ -75,12 +108,13 @@ describe('first login with the initial password 123', () => {
 
     expect((await change('123').expect(400)).body.error.code).toBe('VALIDATION_FAILED'); // too short
     expect((await change('12345').expect(400)).body.error.code).toBe('VALIDATION_FAILED');
-    // A 5-digit ajeer code is already below the 6-character minimum.
-    expect((await change('90001').expect(400)).body.error.code).toBe('VALIDATION_FAILED');
+    expect((await change('9000001').expect(400)).body.error.details.reason).toBe(
+      'EQUALS_AJEER_CODE',
+    );
     await change('abc123').expect(200);
 
     await request(app).get('/api/v1/meta').set('Cookie', cookie).expect(200);
-    const again = await login({ ajeerCode: '90001', password: 'abc123' }).expect(200);
+    const again = await login({ ajeerCode: '9000001', password: 'abc123' }).expect(200);
     expect(again.body.user.mustChangePassword).toBe(false);
   });
 });
@@ -91,7 +125,7 @@ describe('forgot password → district reset', () => {
 
   beforeAll(async () => {
     await seedDemo({ reset: true });
-    arifId = String((await User.findOne({ ajeerCode: '90412' }).lean())!._id);
+    arifId = String((await User.findOne({ ajeerCode: '9090412' }).lean())!._id);
     larkanaUserId = String(
       (await User.findOne({ role: 'zimmedar', unitCode: 'LARKANA_DIST' }).lean())!._id,
     );
@@ -100,7 +134,7 @@ describe('forgot password → district reset', () => {
   it('answers the same whether or not the details match, and only matches open a request', async () => {
     await request(app)
       .post('/api/v1/auth/forgot-password')
-      .send({ ajeerCode: '90412', mobile: '03119999999' })
+      .send({ ajeerCode: '9090412', mobile: '03119999999' })
       .expect(200);
     await request(app)
       .post('/api/v1/auth/forgot-password')
@@ -111,7 +145,7 @@ describe('forgot password → district reset', () => {
     for (let i = 0; i < 2; i += 1) {
       await request(app)
         .post('/api/v1/auth/forgot-password')
-        .send({ ajeerCode: '90412', mobile: '0300 0000000' })
+        .send({ ajeerCode: '9090412', mobile: '0300 0000000' })
         .expect(200);
     }
     expect(await PasswordResetRequest.countDocuments({ status: 'pending' })).toBe(1);
@@ -119,26 +153,26 @@ describe('forgot password → district reset', () => {
   });
 
   it('shows the request to the district (and above), not to other districts', async () => {
-    const district = await loginCookie(app, '40001');
+    const district = await loginCookie(app, '9040001');
     const res = await request(app)
       .get('/api/v1/users/reset-requests')
       .set('Cookie', district)
       .expect(200);
     expect(res.body.requests).toEqual([
-      expect.objectContaining({ ajeerCode: '90412', userId: arifId, unitCode: 'GHOTKI' }),
+      expect.objectContaining({ ajeerCode: '9090412', userId: arifId, unitCode: 'GHOTKI' }),
     ]);
 
     const other = await User.findOne({
       role: 'zimmedar',
       unitCode: 'GHOTKI',
-      ajeerCode: { $ne: '90412' },
+      ajeerCode: { $ne: '9090412' },
     }).lean();
     const zimmedar = await loginCookie(app, other!.ajeerCode);
     await request(app).get('/api/v1/users/reset-requests').set('Cookie', zimmedar).expect(403);
   });
 
   it('district resets: password back to 123, change forced, request closed, audited', async () => {
-    const district = await loginCookie(app, '40001');
+    const district = await loginCookie(app, '9040001');
     await request(app)
       .post(`/api/v1/users/${arifId}/reset-password`)
       .set('Cookie', district)
@@ -147,28 +181,30 @@ describe('forgot password → district reset', () => {
     expect(await PasswordResetRequest.countDocuments({ status: 'pending' })).toBe(0);
     expect(await AuditLog.countDocuments({ action: 'PASSWORD_RESET', targetId: arifId })).toBe(1);
 
-    await login({ ajeerCode: '90412', password: 'demo1234' }).expect(401);
-    const res = await login({ ajeerCode: '90412', password: '123', mobile: '03000000000' }).expect(
-      200,
-    );
+    await login({ ajeerCode: '9090412', password: 'demo1234' }).expect(401);
+    const res = await login({
+      ajeerCode: '9090412',
+      password: '123',
+      mobile: '03000000000',
+    }).expect(200);
     expect(res.body.user.mustChangePassword).toBe(true);
   });
 
   it('district can reset directly (no request), but only its own lower-level users', async () => {
-    const district = await loginCookie(app, '40001');
+    const district = await loginCookie(app, '9040001');
     await request(app)
       .post(`/api/v1/users/${larkanaUserId}/reset-password`)
       .set('Cookie', district)
       .expect(404);
 
-    const division = await loginCookie(app, '30001');
-    const district40001 = String((await User.findOne({ ajeerCode: '40001' }).lean())!._id);
+    const division = await loginCookie(app, '9030001');
+    const district40001 = String((await User.findOne({ ajeerCode: '9040001' }).lean())!._id);
     await request(app)
       .post(`/api/v1/users/${district40001}/reset-password`)
       .set('Cookie', division)
       .expect(200);
 
-    const self = String((await User.findOne({ ajeerCode: '30001' }).lean())!._id);
+    const self = String((await User.findOne({ ajeerCode: '9030001' }).lean())!._id);
     await request(app)
       .post(`/api/v1/users/${self}/reset-password`)
       .set('Cookie', division)

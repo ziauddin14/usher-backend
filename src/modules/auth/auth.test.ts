@@ -13,11 +13,11 @@ describe('auth', () => {
   it('logs in with ajeer code + password, sets an httpOnly session cookie', async () => {
     const res = await request(createApp())
       .post('/api/v1/auth/login')
-      .send({ ajeerCode: '90412', password: 'demo1234' })
+      .send({ ajeerCode: '9090412', password: 'demo1234' })
       .expect(200);
 
     expect(res.body.user).toMatchObject({
-      ajeerCode: '90412',
+      ajeerCode: '9090412',
       name: 'Muhammad Arif',
       nameUr: 'محمد عارف',
       role: 'zimmedar',
@@ -35,20 +35,20 @@ describe('auth', () => {
     expect(cookie).toMatch(/^ushr_session=/);
     expect(cookie).toMatch(/HttpOnly/i);
     expect(cookie).toMatch(/SameSite=Lax/i);
-    expect(await AuditLog.countDocuments({ action: 'LOGIN', actorAjeerCode: '90412' })).toBe(1);
+    expect(await AuditLog.countDocuments({ action: 'LOGIN', actorAjeerCode: '9090412' })).toBe(1);
   });
 
   it('rejects a wrong password with INVALID_CREDENTIALS and audits it', async () => {
     const res = await request(createApp())
       .post('/api/v1/auth/login')
-      .send({ ajeerCode: '40001', password: 'wrong-password' })
+      .send({ ajeerCode: '9040001', password: 'wrong-password' })
       .expect(401);
     expect(res.body).toEqual({
       error: { code: 'INVALID_CREDENTIALS', message: expect.any(String) },
     });
-    expect(await AuditLog.countDocuments({ action: 'LOGIN_FAILED', actorAjeerCode: '40001' })).toBe(
-      1,
-    );
+    expect(
+      await AuditLog.countDocuments({ action: 'LOGIN_FAILED', actorAjeerCode: '9040001' }),
+    ).toBe(1);
   });
 
   it('rejects an unknown ajeer code the same way', async () => {
@@ -72,19 +72,19 @@ describe('auth', () => {
     for (let i = 0; i < 5; i += 1) {
       await request(app)
         .post('/api/v1/auth/login')
-        .send({ ajeerCode: '30001', password: 'nope' })
+        .send({ ajeerCode: '9030001', password: 'nope' })
         .expect(401);
     }
     const blocked = await request(app)
       .post('/api/v1/auth/login')
-      .send({ ajeerCode: '30001', password: 'demo1234' })
+      .send({ ajeerCode: '9030001', password: 'demo1234' })
       .expect(429);
     expect(blocked.body.error.code).toBe('RATE_LIMITED');
 
     // Another ajeer code from the same IP is not blocked.
     await request(app)
       .post('/api/v1/auth/login')
-      .send({ ajeerCode: '20001', password: 'demo1234' })
+      .send({ ajeerCode: '9020001', password: 'demo1234' })
       .expect(200);
   });
 
@@ -102,10 +102,10 @@ describe('auth', () => {
 
   it('GET /auth/me returns the session user', async () => {
     const app = createApp();
-    const cookie = await loginCookie(app, '40001');
+    const cookie = await loginCookie(app, '9040001');
     const res = await request(app).get('/api/v1/auth/me').set('Cookie', cookie).expect(200);
     expect(res.body.user).toMatchObject({
-      ajeerCode: '40001',
+      ajeerCode: '9040001',
       role: 'district',
       unit: { code: 'GHOTKI' },
     });
@@ -118,12 +118,12 @@ describe('auth', () => {
 
   it('changes the password, then the new one works and the old one does not', async () => {
     const app = createApp();
-    const cookie = await loginCookie(app, '10001');
+    const cookie = await loginCookie(app, '9010001');
 
     const sameAsCode = await request(app)
       .post('/api/v1/auth/change-password')
       .set('Cookie', cookie)
-      .send({ currentPassword: 'demo1234', newPassword: '10001' })
+      .send({ currentPassword: 'demo1234', newPassword: '9010001' })
       .expect(400);
     expect(sameAsCode.body.error.code).toBe('VALIDATION_FAILED');
 
@@ -140,16 +140,16 @@ describe('auth', () => {
       .send({ currentPassword: 'demo1234', newPassword: 'new-pass-123' })
       .expect(200);
     expect(
-      await AuditLog.countDocuments({ action: 'PASSWORD_CHANGE', actorAjeerCode: '10001' }),
+      await AuditLog.countDocuments({ action: 'PASSWORD_CHANGE', actorAjeerCode: '9010001' }),
     ).toBe(1);
 
     await request(app)
       .post('/api/v1/auth/login')
-      .send({ ajeerCode: '10001', password: 'new-pass-123' })
+      .send({ ajeerCode: '9010001', password: 'new-pass-123' })
       .expect(200);
     await request(app)
       .post('/api/v1/auth/login')
-      .send({ ajeerCode: '10001', password: 'demo1234' })
+      .send({ ajeerCode: '9010001', password: 'demo1234' })
       .expect(401);
   });
 });

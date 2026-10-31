@@ -132,35 +132,35 @@ export interface SeedUser {
 /** The five demo logins (scope §6). */
 export const DEMO_USERS: SeedUser[] = [
   {
-    ajeerCode: '10001',
+    ajeerCode: '9010001',
     name: 'Muhammad Saleem',
     nameUr: 'محمد سلیم',
     role: 'pakistan',
     unitCode: 'PK',
   },
   {
-    ajeerCode: '20001',
+    ajeerCode: '9020001',
     name: 'Abdul Qadir',
     nameUr: 'عبد القادر',
     role: 'suba',
     unitCode: 'INT_SINDH',
   },
   {
-    ajeerCode: '30001',
+    ajeerCode: '9030001',
     name: 'Ghulam Mustafa',
     nameUr: 'غلام مصطفیٰ',
     role: 'division',
     unitCode: 'SUKKUR',
   },
   {
-    ajeerCode: '40001',
+    ajeerCode: '9040001',
     name: 'Abdul Rashid',
     nameUr: 'عبد الرشید',
     role: 'district',
     unitCode: 'GHOTKI',
   },
   {
-    ajeerCode: '90412',
+    ajeerCode: '9090412',
     name: 'Muhammad Arif',
     nameUr: 'محمد عارف',
     role: 'zimmedar',
@@ -247,15 +247,11 @@ export function rng(seed: number): () => number {
   };
 }
 
-/** ~60 invented zimmedaran: 10 in Ghotki (incl. demo 90412), 2–4 in every other district. */
+/** ~60 invented zimmedaran: 10 in Ghotki (incl. demo 9090412), 2–4 in every other district. */
 export function seedZimmedaran(districtCodes: string[]): SeedUser[] {
   const rand = rng(2026);
   const users: SeedUser[] = [];
-  let next = 90001;
-  const nextCode = () => {
-    if (next === 90412) next += 1; // reserved for the demo zimmedar
-    return String(next++);
-  };
+  let next = 9000001;
   for (const unitCode of districtCodes) {
     const count = unitCode === 'GHOTKI' ? 9 : 2 + Math.floor(rand() * 3);
     for (let i = 0; i < count; i += 1) {
@@ -264,7 +260,7 @@ export function seedZimmedaran(districtCodes: string[]): SeedUser[] {
       const n = users.length;
       const zimmedari: Zimmedari = n % 9 === 8 ? 'event' : n % 5 === 4 ? 'tehsil_town' : 'ushar';
       users.push({
-        ajeerCode: nextCode(),
+        ajeerCode: String(next++),
         name: `${fr} ${lr}`,
         nameUr: `${fu} ${lu}`,
         role: 'zimmedar',

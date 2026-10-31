@@ -45,7 +45,48 @@ async function normalizePackage(buffer: Buffer): Promise<Buffer> {
       changed = true;
     }
   }
+  if (await dropSheets(zip, NEVER_READ_SHEETS)) changed = true;
   return changed ? zip.generateAsync({ type: 'nodebuffer' }) : buffer;
+}
+
+/**
+ * Sheets no import may read (CTO, 31 Oct 2026): the village list's "Location" sheet holds
+ * login passwords. They are removed from the package before ExcelJS parses any cell.
+ */
+const NEVER_READ_SHEETS = /^\s*location\s*$/i;
+
+async function dropSheets(zip: JSZip, skip: RegExp): Promise<boolean> {
+  const workbookXml = await zip.file('xl/workbook.xml')?.async('string');
+  const relsXml = await zip.file('xl/_rels/workbook.xml.rels')?.async('string');
+  if (!workbookXml || !relsXml) return false;
+  let rels = relsXml;
+  let types = (await zip.file('[Content_Types].xml')?.async('string')) ?? '';
+  const dropped: string[] = [];
+  let workbook = workbookXml.replace(/<sheet\b[^>]*\/>/g, (tag) => {
+    const name = /\bname="([^"]*)"/.exec(tag)?.[1] ?? '';
+    if (!skip.test(name)) return tag;
+    const id = /\b\w+:id="([^"]*)"/.exec(tag)?.[1];
+    const rel = id ? new RegExp(`<Relationship\\b[^>]*\\bId="${id}"[^>]*/>`).exec(rels) : null;
+    const target = rel ? /\bTarget="([^"]*)"/.exec(rel[0])?.[1] : undefined;
+    if (rel) rels = rels.replace(rel[0], '');
+    if (target) {
+      const part = posix.join('xl', target);
+      zip.remove(part);
+      zip.remove(posix.join(posix.dirname(part), '_rels', `${posix.basename(part)}.rels`));
+      types = types.replace(new RegExp(`<Override\\b[^>]*PartName="/${part}"[^>]*/>`), '');
+    }
+    dropped.push(name);
+    return '';
+  });
+  if (dropped.length === 0) return false;
+  // Named ranges that point into a dropped sheet would point nowhere.
+  workbook = workbook.replace(/<definedName\b[^>]*>([^<]*)<\/definedName>/g, (tag, ref: string) =>
+    dropped.some((n) => ref.includes(`${n}!`) || ref.includes(`'${n}'!`)) ? '' : tag,
+  );
+  zip.file('xl/workbook.xml', workbook);
+  zip.file('xl/_rels/workbook.xml.rels', rels);
+  if (types) zip.file('[Content_Types].xml', types);
+  return true;
 }
 
 /** Load an .xlsx file, tolerating exporter quirks. */

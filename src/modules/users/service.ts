@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { audit } from '../../lib/audit.js';
 import type { AuthUser } from '../../lib/auth.js';
 import { connectDb } from '../../lib/db.js';
 import { AppError } from '../../lib/errors.js';
@@ -14,7 +15,26 @@ function lowerRoles(caller: AuthUser): Role[] {
 }
 
 /** Users in the caller's subtree whose role is below the caller's (API: GET /users). */
-export async function listUsers(caller: AuthUser, opts: { unit?: string; q?: string }) {
+export type MobileStatus = 'verified' | 'unverified' | 'none';
+
+export function mobileStatusOf(u: {
+  mobile?: string | null;
+  mobileVerified?: boolean | null;
+}): MobileStatus {
+  if (!u.mobile) return 'none';
+  return u.mobileVerified === false ? 'unverified' : 'verified';
+}
+
+const MOBILE_FILTER: Record<MobileStatus, Record<string, unknown>> = {
+  none: { mobile: { $exists: false } },
+  unverified: { mobile: { $exists: true }, mobileVerified: false },
+  verified: { mobile: { $exists: true }, mobileVerified: { $ne: false } },
+};
+
+export async function listUsers(
+  caller: AuthUser,
+  opts: { unit?: string; q?: string; mobileStatus?: MobileStatus },
+) {
   await connectDb();
 
   let scope = scopeFilter(caller);
@@ -24,7 +44,11 @@ export async function listUsers(caller: AuthUser, opts: { unit?: string; q?: str
     scope = scopeFilter({ unitPath: unit.path });
   }
 
-  const filter: Record<string, unknown> = { ...scope, role: { $in: lowerRoles(caller) } };
+  const filter: Record<string, unknown> = {
+    ...scope,
+    role: { $in: lowerRoles(caller) },
+    ...(opts.mobileStatus ? MOBILE_FILTER[opts.mobileStatus] : {}),
+  };
   if (opts.q) {
     const re = { $regex: escapeRegex(opts.q), $options: 'i' };
     filter.$or = [{ name: re }, { nameUr: re }, { ajeerCode: re }];
@@ -32,7 +56,7 @@ export async function listUsers(caller: AuthUser, opts: { unit?: string; q?: str
 
   const users = await User.find(filter)
     .select(
-      'ajeerCode name nameUr fatherName mobile role zimmedari unitCode isActive mustChangePassword lastLoginAt',
+      'ajeerCode ajeerCodeFull name nameUr fatherName mobile mobileVerified role zimmedari unitCode isActive mustChangePassword lastLoginAt',
     )
     .sort({ unitCode: 1, ajeerCode: 1 })
     .limit(500)
@@ -41,10 +65,12 @@ export async function listUsers(caller: AuthUser, opts: { unit?: string; q?: str
   return users.map((u) => ({
     id: String(u._id),
     ajeerCode: u.ajeerCode,
+    ajeerCodeFull: u.ajeerCodeFull,
     name: u.name,
     nameUr: u.nameUr,
     fatherName: u.fatherName,
     mobile: maskMobile(u.mobile),
+    mobileStatus: mobileStatusOf(u),
     role: u.role,
     zimmedari: u.zimmedari,
     unitCode: u.unitCode,
@@ -91,4 +117,29 @@ export async function resetPassword(caller: AuthUser, userId: string): Promise<v
     throw new AppError(403, 'FORBIDDEN', 'Only users below your level can be reset');
   }
   await resetToInitialPassword(caller, target);
+}
+
+/** District (or above) confirms a number the user typed at the first login. Audit MOBILE_CONFIRM. */
+export async function confirmMobile(caller: AuthUser, userId: string): Promise<void> {
+  await connectDb();
+  const target = Types.ObjectId.isValid(userId)
+    ? await User.findById(userId).select('ajeerCode role unitPath mobile mobileVerified').lean()
+    : null;
+  assertInScope(caller, target);
+  if (ROLE_RANK[target.role] >= ROLE_RANK[caller.role]) {
+    throw new AppError(403, 'FORBIDDEN', 'Only users below your level can be confirmed');
+  }
+  if (!target.mobile) throw new AppError(409, 'CONFLICT', 'This user has no mobile number yet');
+  if (target.mobileVerified === false) {
+    await User.updateOne({ _id: target._id }, { $set: { mobileVerified: true } });
+  }
+  await audit({
+    action: 'MOBILE_CONFIRM',
+    actorId: caller.id,
+    actorAjeerCode: caller.ajeerCode,
+    targetType: 'user',
+    targetId: String(target._id),
+    unitPath: target.unitPath,
+    details: { targetAjeerCode: target.ajeerCode, mobile: maskMobile(target.mobile) },
+  });
 }

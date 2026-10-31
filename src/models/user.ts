@@ -18,12 +18,16 @@ export type Zimmedari = (typeof ZIMMEDARI)[number];
 const userSchema = new Schema(
   {
     ajeerCode: { type: String, required: true, unique: true, match: /^\d+$/ },
+    /** The code as written in the employee list, e.g. "12345/1" (login uses ajeerCode "12345"). */
+    ajeerCodeFull: { type: String },
     name: { type: String, required: true },
     nameUr: { type: String },
     /** Walid (father's name) from the employee list. */
     fatherName: { type: String },
     /** Registered mobile, normalized 03XXXXXXXXX — checked on first login and forgot-password. */
     mobile: { type: String, match: /^03\d{9}$/ },
+    /** false = typed by the user at the first login, waiting for the District to confirm ("tasdeeq baqi"). */
+    mobileVerified: { type: Boolean },
     role: { type: String, enum: ROLES, required: true },
     zimmedari: { type: String, enum: ZIMMEDARI },
     unitCode: { type: String, required: true },

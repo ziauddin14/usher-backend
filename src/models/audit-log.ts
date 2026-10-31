@@ -8,9 +8,12 @@ export const AUDIT_ACTIONS = [
   'VILLAGE_ADD',
   'VILLAGE_APPROVE',
   'VILLAGE_MERGE',
+  'VILLAGE_REASSIGN',
   'PASSWORD_RESET',
   'PASSWORD_RESET_REQUEST',
   'PASSWORD_CHANGE',
+  'MOBILE_SELF_REGISTER',
+  'MOBILE_CONFIRM',
   'USER_STATUS',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

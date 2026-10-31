@@ -18,7 +18,7 @@ describe('GET /users (supervisor-only, scoped)', () => {
   });
 
   it('a zimmedar token cannot call a supervisor-only endpoint (403)', async () => {
-    const cookie = await loginCookie(app, '90412');
+    const cookie = await loginCookie(app, '9090412');
     const res = await request(app).get('/api/v1/users').set('Cookie', cookie).expect(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
   });
@@ -28,7 +28,7 @@ describe('GET /users (supervisor-only, scoped)', () => {
   });
 
   it('district sees only the zimmedaran of its own district', async () => {
-    const cookie = await loginCookie(app, '40001');
+    const cookie = await loginCookie(app, '9040001');
     const res = await request(app).get('/api/v1/users').set('Cookie', cookie).expect(200);
     const users = res.body.users as ListedUser[];
     expect(users).toHaveLength(10);
@@ -37,7 +37,7 @@ describe('GET /users (supervisor-only, scoped)', () => {
   });
 
   it('district cannot list another district (404)', async () => {
-    const cookie = await loginCookie(app, '40001');
+    const cookie = await loginCookie(app, '9040001');
     const res = await request(app)
       .get('/api/v1/users?unit=LARKANA_DIST')
       .set('Cookie', cookie)
@@ -46,7 +46,7 @@ describe('GET /users (supervisor-only, scoped)', () => {
   });
 
   it('division sees its districts and their zimmedaran, not other divisions', async () => {
-    const cookie = await loginCookie(app, '30001');
+    const cookie = await loginCookie(app, '9030001');
     const res = await request(app).get('/api/v1/users').set('Cookie', cookie).expect(200);
     const users = res.body.users as ListedUser[];
     expect(new Set(users.map((u) => u.unitCode))).toEqual(
@@ -57,8 +57,8 @@ describe('GET /users (supervisor-only, scoped)', () => {
   });
 
   it('searches by name or ajeer code', async () => {
-    const cookie = await loginCookie(app, '10001');
-    const res = await request(app).get('/api/v1/users?q=90412').set('Cookie', cookie).expect(200);
-    expect((res.body.users as ListedUser[]).map((u) => u.ajeerCode)).toEqual(['90412']);
+    const cookie = await loginCookie(app, '9010001');
+    const res = await request(app).get('/api/v1/users?q=9090412').set('Cookie', cookie).expect(200);
+    expect((res.body.users as ListedUser[]).map((u) => u.ajeerCode)).toEqual(['9090412']);
   });
 });

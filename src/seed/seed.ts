@@ -1,7 +1,7 @@
 import type { Types } from 'mongoose';
 import bcrypt from 'bcryptjs';
 import { connectDb } from '../lib/db.js';
-import { clearSettingsCache } from '../lib/settings.js';
+import { clearSettingsCache, ensureSettings } from '../lib/settings.js';
 import { villageNameKey } from '../lib/text.js';
 import { AuditLog } from '../models/audit-log.js';
 import { Jadwal } from '../models/jadwal.js';
@@ -11,7 +11,6 @@ import { Unit } from '../models/unit.js';
 import { User } from '../models/user.js';
 import { Village } from '../models/village.js';
 import { BCRYPT_COST } from '../modules/auth/service.js';
-import { DEFAULT_SETTINGS } from '../modules/settings/defaults.js';
 import {
   DEMO_PASSWORD,
   DEMO_USERS,
@@ -30,7 +29,7 @@ const LIVE_STATUSES: ('approved' | 'pending')[] = ['approved', 'pending'];
 
 /**
  * Like the real village list: every approved village belongs to one Ushar Zimmedar of its
- * district. Round-robin in name order (the demo zimmedar 90412 first); villages that already
+ * district. Round-robin in name order (the demo zimmedar 9090412 first); villages that already
  * have someone keep them.
  */
 async function assignSeedVillages(): Promise<void> {
@@ -41,7 +40,7 @@ async function assignSeedVillages(): Promise<void> {
   const byDistrict = new Map<string, typeof zimmedaran>();
   for (const z of zimmedaran) {
     const list = byDistrict.get(z.unitPath) ?? [];
-    if (z.ajeerCode === '90412') list.unshift(z);
+    if (z.ajeerCode === '9090412') list.unshift(z);
     else list.push(z);
     byDistrict.set(z.unitPath, list);
   }
@@ -57,7 +56,7 @@ async function assignSeedVillages(): Promise<void> {
       .sort({ nameKey: 1 })
       .lean();
     // The demo zimmedar gets 5 villages (as in design A4); the rest are shared round-robin.
-    const demoFirst = list[0]?.ajeerCode === '90412' && list.length > 1;
+    const demoFirst = list[0]?.ajeerCode === '9090412' && list.length > 1;
     villages.forEach((v, i) => {
       const owner = demoFirst
         ? i < 5
@@ -118,8 +117,7 @@ export async function seedDemo({ reset = false } = {}): Promise<SeedResult> {
     })),
   );
 
-  await Setting.updateOne({ _id: 'app' }, { $setOnInsert: DEFAULT_SETTINGS }, { upsert: true });
-  clearSettingsCache();
+  await ensureSettings();
 
   // Users. One hash for the shared demo password keeps the seed fast.
   const passwordHash = await bcrypt.hash(DEMO_PASSWORD, BCRYPT_COST);
@@ -171,7 +169,7 @@ export async function seedDemo({ reset = false } = {}): Promise<SeedResult> {
   await assignSeedVillages();
 
   // TODO(Step 3): seed jadwal history 1 Jun 2026 → yesterday (data model "Seed" → Jadwals),
-  // including the exact monthly reward-wusooli for 90412.
+  // including the exact monthly reward-wusooli for 9090412.
 
   return { units: units.length, users: users.length, villages: villageOps.length };
 }

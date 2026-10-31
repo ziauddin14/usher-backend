@@ -4,6 +4,7 @@ import ExcelJS from 'exceljs';
 import { Types } from 'mongoose';
 import { normalizeAjeerCode } from '../../lib/ajeer-code.js';
 import { connectDb } from '../../lib/db.js';
+import { DistrictNames } from '../../lib/district-names.js';
 import { villageNameKey } from '../../lib/text.js';
 import { unitKey } from '../../lib/unit-name.js';
 import { headerKey, loadWorkbook, readRows } from '../../lib/xlsx.js';
@@ -75,6 +76,14 @@ export interface VillageImportResult {
   assigned: number;
   /** Villages not imported because their district could not be found. */
   unmatchedVillages: UnmatchedRow[];
+  /** Rows without a village name (not imported). */
+  noName: UnmatchedRow[];
+  /**
+   * Villages listed under a District / Division (or other supervisor) user: imported with no
+   * zimmedar ("district pool") — every zimmedar of the district finds them by search, and the
+   * District assigns them in Step 4.
+   */
+  districtPool: UnmatchedRow[];
   /** Villages imported without a zimmedar, because the zimmedar could not be matched. */
   unmatchedZimmedar: UnmatchedRow[];
   conflicts: Conflict[];
@@ -91,12 +100,14 @@ interface Group {
   votes: Map<string, number>;
   /** First reason no zimmedar matched (reported only if no row of this village matched). */
   problem?: UnmatchedRow;
+  /** Listed under a supervisor: goes to the district pool if no row names a zimmedar. */
+  pool?: UnmatchedRow;
 }
 
 /** Plan and (unless dryRun) apply. Upsert by district + nameKey; never touches merged villages. */
 export async function importVillages(
   rows: VillageRow[],
-  { dryRun }: { dryRun: boolean },
+  { dryRun, names = DistrictNames.load() }: { dryRun: boolean; names?: DistrictNames },
 ): Promise<VillageImportResult> {
   await connectDb();
 
@@ -104,7 +115,22 @@ export async function importVillages(
   const byCode = new Map(users.map((u) => [u.ajeerCode, u]));
   const nameKeyOf = (s: string) => headerKey(s);
 
-  const districts = await Unit.find({ level: 'district' }).select('code name nameUr path').lean();
+  const units = await Unit.find().select('code name nameUr level parentCode path').lean();
+  const unitByCode = new Map(units.map((u) => [u.code, u]));
+  const districts = units.filter((u) => u.level === 'district');
+  // Urdu chain "suba|division|district" → district, for the Roman spellings in district-names.csv.
+  const urduKey = (...parts: string[]) => parts.map(unitKey).join('|');
+  const districtByUrduChain = new Map<string, (typeof districts)[number]>();
+  for (const d of districts) {
+    const division = d.parentCode ? unitByCode.get(d.parentCode) : undefined;
+    const suba = division?.parentCode ? unitByCode.get(division.parentCode) : undefined;
+    if (division && suba) {
+      districtByUrduChain.set(
+        urduKey(suba.nameUr ?? suba.name, division.nameUr ?? division.name, d.nameUr ?? d.name),
+        d,
+      );
+    }
+  }
   const districtsByKey = new Map<string, typeof districts>();
   const districtByPath = new Map(districts.map((d) => [d.path, d]));
   for (const d of districts) {
@@ -116,6 +142,8 @@ export async function importVillages(
 
   const groups = new Map<string, Group>();
   const unmatchedVillages: UnmatchedRow[] = [];
+  const noName: UnmatchedRow[] = [];
+  const districtPool: UnmatchedRow[] = [];
   const unmatchedZimmedar: UnmatchedRow[] = [];
   const labels = new Map<string, string>(); // user id → "<ajeer code> <name>"
   let duplicateRows = 0;
@@ -137,7 +165,7 @@ export async function importVillages(
     });
 
     if (!name) {
-      unmatchedVillages.push(report('Gaon ka naam is missing'));
+      noName.push(report('Gaon ka naam is missing'));
       continue;
     }
 
@@ -149,9 +177,13 @@ export async function importVillages(
       if (d) district = { code: d.code, path: d.path };
     }
     if (!district && districtText) {
-      const candidates = (districtsByKey.get(unitKey(districtText)) ?? []).filter(
-        (d) => !user || d.path === user.unitPath || d.path.startsWith(`${user.unitPath}/`),
-      );
+      const chain = names.forVillageFileName(districtText);
+      const mapped = chain
+        ? districtByUrduChain.get(urduKey(chain.subaUr, chain.divisionUr, chain.districtUr))
+        : undefined;
+      const candidates = (
+        mapped ? [mapped] : (districtsByKey.get(unitKey(districtText)) ?? [])
+      ).filter((d) => !user || d.path === user.unitPath || d.path.startsWith(`${user.unitPath}/`));
       if (candidates.length === 1)
         district = { code: candidates[0]!.code, path: candidates[0]!.path };
     }
@@ -165,10 +197,11 @@ export async function importVillages(
     // 2. Zimmedar: by ajeer code, else by name among the district's zimmedaran.
     let assignee: { id: string; label: string } | undefined;
     let zimmedarProblem: string | undefined;
+    let poolReason: string | undefined;
     if (code) {
       if (!user) zimmedarProblem = `Ajeer code ${code} not found (import employees first)`;
       else if (user.role !== 'zimmedar') {
-        zimmedarProblem = `Ajeer code ${code} is a ${user.role} user, not an Ushar Zimmedar`;
+        poolReason = `Ajeer code ${code} is a ${user.role} user → district pool`;
       } else if (user.unitPath !== district.path) {
         zimmedarProblem = `Ajeer code ${code} belongs to another district`;
       } else assignee = { id: String(user._id), label: `${user.ajeerCode} ${user.name}` };
@@ -203,6 +236,8 @@ export async function importVillages(
     if (assignee) {
       group.votes.set(assignee.id, (group.votes.get(assignee.id) ?? 0) + 1);
       labels.set(assignee.id, assignee.label);
+    } else if (poolReason && !group.pool) {
+      group.pool = report(poolReason);
     } else if (zimmedarProblem && !group.problem) {
       group.problem = report(zimmedarProblem);
     }
@@ -221,7 +256,8 @@ export async function importVillages(
         chosen: labels.get(chosen!) ?? '',
       });
     }
-    if (!chosen && g.problem) unmatchedZimmedar.push(g.problem);
+    if (!chosen && g.pool) districtPool.push(g.pool);
+    else if (!chosen && g.problem) unmatchedZimmedar.push(g.problem);
     return { ...g, assignedTo: chosen };
   });
 
@@ -241,6 +277,8 @@ export async function importVillages(
     updated: plans.filter((p) => existingKeys.has(`${p.district.path}|${p.nameKey}`)).length,
     assigned: plans.filter((p) => p.assignedTo).length,
     unmatchedVillages,
+    noName,
+    districtPool,
     unmatchedZimmedar,
     conflicts,
   };
@@ -289,6 +327,16 @@ export async function writeVillageReport(result: VillageImportResult, file: stri
       u.zimmedar,
       u.problem,
     ]),
+  );
+  sheet(
+    'Bina naam',
+    ['Row', 'Gaon', 'Tehsil', 'District', 'Zimmedar', 'Masla'],
+    result.noName.map((u) => [u.row, u.village, u.tehsil, u.district, u.zimmedar, u.problem]),
+  );
+  sheet(
+    'District pool',
+    ['Row', 'Gaon', 'Tehsil', 'District', 'Kis ke naam', 'Baat'],
+    result.districtPool.map((u) => [u.row, u.village, u.tehsil, u.district, u.zimmedar, u.problem]),
   );
   sheet(
     'Zimmedar nahi mila',

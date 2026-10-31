@@ -21,7 +21,7 @@ describe('seedDemo', () => {
   });
 
   it('creates the 5 demo logins and ~60 invented zimmedaran', async () => {
-    for (const code of ['10001', '20001', '30001', '40001', '90412']) {
+    for (const code of ['9010001', '9020001', '9030001', '9040001', '9090412']) {
       expect(await User.exists({ ajeerCode: code })).toBeTruthy();
     }
     const zimmedaran = await User.countDocuments({ role: 'zimmedar' });
@@ -39,12 +39,12 @@ describe('seedDemo', () => {
   });
 
   it('is idempotent and keeps changed passwords', async () => {
-    await User.updateOne({ ajeerCode: '40001' }, { $set: { passwordHash: 'changed' } });
+    await User.updateOne({ ajeerCode: '9040001' }, { $set: { passwordHash: 'changed' } });
     const before = { users: await User.countDocuments(), villages: await Village.countDocuments() };
     await seedDemo();
     expect(await User.countDocuments()).toBe(before.users);
     expect(await Village.countDocuments()).toBe(before.villages);
-    const user = await User.findOne({ ajeerCode: '40001' }).select('+passwordHash').lean();
+    const user = await User.findOne({ ajeerCode: '9040001' }).select('+passwordHash').lean();
     expect(user?.passwordHash).toBe('changed');
   });
 });

@@ -13,9 +13,9 @@ import { seedDemo } from '../../seed/seed.js';
 const app = createApp();
 const today = karachiDate();
 
-let arif: string; // 90412, Ghotki
+let arif: string; // 9090412, Ghotki
 let other: string; // another Ghotki zimmedar
-let district: string; // 40001 Ghotki
+let district: string; // 9040001 Ghotki
 let larkanaDistrict: string;
 let villageIds: string[];
 
@@ -55,11 +55,11 @@ beforeAll(async () => {
   const otherUser = await User.findOne({
     role: 'zimmedar',
     unitCode: 'GHOTKI',
-    ajeerCode: { $ne: '90412' },
+    ajeerCode: { $ne: '9090412' },
   }).lean();
-  arif = await loginCookie(app, '90412');
+  arif = await loginCookie(app, '9090412');
   other = await loginCookie(app, otherUser!.ajeerCode);
-  district = await loginCookie(app, '40001');
+  district = await loginCookie(app, '9040001');
   larkanaDistrict = await loginCookie(app, '40002');
   villageIds = (await Village.find({ districtCode: 'GHOTKI' }).sort({ nameKey: 1 }).lean()).map(
     (v) => String(v._id),
@@ -154,6 +154,29 @@ describe('villages and visits', () => {
     expect(all).toHaveLength(villageIds.length);
     expect(all.slice(0, 5).every((v) => v.mine)).toBe(true); // own villages first
     expect(all.slice(5).some((v) => v.mine)).toBe(false);
+  });
+
+  it('a "district pool" village (no zimmedar) is found by every zimmedar of the district in search', async () => {
+    await Village.create({
+      name: 'گوٹھ پول',
+      nameKey: 'پول',
+      districtCode: 'GHOTKI',
+      unitPath: 'PK/INT_SINDH/SUKKUR/GHOTKI',
+      status: 'approved',
+    });
+    for (const cookie of [arif, other]) {
+      const mine = (await api(cookie).get('/villages').expect(200)).body.villages as {
+        name: string;
+      }[];
+      expect(mine.some((v) => v.name === 'گوٹھ پول')).toBe(false);
+      const found = (
+        await api(cookie)
+          .get('/villages?q=' + encodeURIComponent('پول'))
+          .expect(200)
+      ).body.villages as { name: string; mine: boolean }[];
+      expect(found).toEqual([expect.objectContaining({ name: 'گوٹھ پول', mine: false })]);
+    }
+    await Village.deleteOne({ nameKey: 'پول' }); // test-only cleanup of the invented village
   });
 
   it('adds a pending village usable by the adder only; duplicate name → 409 VILLAGE_EXISTS', async () => {

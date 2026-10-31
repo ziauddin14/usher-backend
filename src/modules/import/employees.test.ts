@@ -53,7 +53,7 @@ describe('employee import', () => {
     file = await writeSheet([
       // new zimmedar in an existing district (name written with "District")
       [
-        880001,
+        '880001/1',
         'Test Zimmedar One',
         'Test Walid',
         'Ushar',
@@ -91,8 +91,8 @@ describe('employee import', () => {
       [880004, 'Bad Role', '', 'Manager', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
       [880005, 'No District', '', 'Ushar', 'Interior Sindh', 'Sukkur', '', ''],
       [880006, 'Bad Mobile', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', '12345'],
-      [880001, 'Duplicate', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
-      [90412, 'Real Person', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
+      ['880001/2', 'Duplicate', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
+      [9090412, 'Real Person', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
     ]);
   });
 
@@ -103,7 +103,10 @@ describe('employee import', () => {
   it('reads the header row and cell text', async () => {
     const rows = await readEmployeeSheet(file);
     expect(rows).toHaveLength(10);
-    expect(rows[0]).toMatchObject({ row: 3, values: { ajeerCode: '880001', zimmedari: 'Ushar' } });
+    expect(rows[0]).toMatchObject({
+      row: 3,
+      values: { ajeerCode: '880001/1', zimmedari: 'Ushar' },
+    });
   });
 
   it('reports every bad row with its row number', async () => {
@@ -111,7 +114,18 @@ describe('employee import', () => {
     expect(plan.errors.map((e) => e.row)).toEqual([7, 8, 9, 10, 11]);
     expect(plan.errors.find((e) => e.row === 8)?.message).toMatch(/Zimmedari/);
     expect(plan.errors.find((e) => e.row === 11)?.message).toMatch(/twice/);
-    expect(plan.warnings.map((w) => w.ajeerCode)).toEqual(['880007', '90412']); // no mobile
+    expect(plan.warnings.map((w) => w.ajeerCode)).toEqual(['880007', '9090412']); // no mobile
+    expect(plan.otherSuffix.map((r) => r.ajeerCodeFull)).toEqual(['880001/2']);
+    // "880001/1" and "880001/2" share the login code 880001: listed for the CTO.
+    expect(plan.sameCode).toEqual([
+      {
+        ajeerCode: '880001',
+        rows: [
+          expect.objectContaining({ row: 3, ajeerCodeFull: '880001/1', imported: true }),
+          expect.objectContaining({ row: 11, ajeerCodeFull: '880001/2', imported: false }),
+        ],
+      },
+    ]);
   });
 
   it('--dry-run writes nothing', async () => {
@@ -132,10 +146,12 @@ describe('employee import', () => {
     const before = await User.findOne({ ajeerCode: '880007' }).select('+passwordHash').lean();
     const result = await importEmployees(await readEmployeeSheet(file), { dryRun: false });
     expect(result).toMatchObject({ created: 3, updated: 1 });
-    expect(result.errors.find((e) => e.ajeerCode === '90412')?.message).toMatch(/demo user/);
+    expect(result.errors.find((e) => e.ajeerCode === '9090412')?.message).toMatch(/demo user/);
 
     const one = await User.findOne({ ajeerCode: '880001' }).select('+passwordHash').lean();
     expect(one).toMatchObject({
+      ajeerCodeFull: '880001/1',
+      mobileVerified: true,
       role: 'zimmedar',
       zimmedari: 'ushar',
       unitCode: 'GHOTKI',
@@ -164,7 +180,7 @@ describe('employee import', () => {
     expect(after?.passwordHash).toBe(before?.passwordHash);
     expect(after?.mustChangePassword).toBe(before?.mustChangePassword);
 
-    const demo = await User.findOne({ ajeerCode: '90412' }).lean();
+    const demo = await User.findOne({ ajeerCode: '9090412' }).lean();
     expect(demo?.name).toBe('Muhammad Arif');
   });
 

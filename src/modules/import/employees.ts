@@ -2,7 +2,9 @@
 // Upsert by Ajeer Code; new units are created on the fly; existing passwords are never touched.
 import bcrypt from 'bcryptjs';
 import { connectDb } from '../../lib/db.js';
-import { normalizeAjeerCode } from '../../lib/ajeer-code.js';
+import { DistrictNames } from '../../lib/district-names.js';
+import ExcelJS from 'exceljs';
+import { fullAjeerCode, normalizeAjeerCode } from '../../lib/ajeer-code.js';
 import { normalizeMobile } from '../../lib/mobile.js';
 import { LEVEL_WORDS, unitKey } from '../../lib/unit-name.js';
 import { headerKey, loadWorkbook, readRows } from '../../lib/xlsx.js';
@@ -66,6 +68,8 @@ export interface RawRow {
 export interface ValidRow {
   row: number;
   ajeerCode: string;
+  /** As written in the file, e.g. "12345/1". */
+  ajeerCodeFull: string;
   name: string;
   nameUr?: string;
   fatherName?: string;
@@ -83,10 +87,26 @@ export interface RowProblem {
   message: string;
 }
 
+/** One login code that appears on more than one row (e.g. "12345/1" and "12345/2"). */
+export interface SameCodeGroup {
+  ajeerCode: string;
+  rows: {
+    row: number;
+    ajeerCodeFull: string;
+    name: string;
+    zimmedari: string;
+    district: string;
+    imported?: boolean;
+  }[];
+}
+
 export interface ImportPlan {
   valid: ValidRow[];
   errors: RowProblem[];
   warnings: RowProblem[];
+  sameCode: SameCodeGroup[];
+  /** Rows whose code ends in something other than "/1" ("12345/2", "12345/3"). */
+  otherSuffix: SameCodeGroup['rows'];
 }
 
 export interface ImportResult {
@@ -97,6 +117,10 @@ export interface ImportResult {
   newUnits: { code: string; name: string; level: UnitLevel; path: string }[];
   errors: RowProblem[];
   warnings: RowProblem[];
+  /** Codes on more than one row: the first row is imported, the others are rejected. */
+  sameCode: SameCodeGroup[];
+  /** Rows whose code ends in something other than "/1" — listed for the CTO. */
+  otherSuffix: SameCodeGroup['rows'];
 }
 
 const clean = (s: string | undefined) => s?.replace(/\s+/g, ' ').trim() || undefined;
@@ -113,12 +137,29 @@ export function validateRows(rows: RawRow[]): ImportPlan {
   const errors: RowProblem[] = [];
   const warnings: RowProblem[] = [];
   const seen = new Set<string>();
+  const byCode = new Map<string, SameCodeGroup['rows']>();
 
   for (const { row, values } of rows) {
     const ajeerCode = normalizeAjeerCode(values.ajeerCode) ?? '';
+    const ajeerCodeFull = fullAjeerCode(values.ajeerCode) ?? ajeerCode;
     const problems: string[] = [];
     if (!ajeerCode) problems.push('Ajeer Code must be 3–9 digits (optionally followed by /n)');
-    else if (seen.has(ajeerCode)) problems.push('Ajeer Code appears twice in the file');
+    else if (seen.has(ajeerCode)) {
+      problems.push(
+        `Ajeer Code appears twice in the file (login code ${ajeerCode}; first row kept)`,
+      );
+    }
+    if (ajeerCode) {
+      const group = byCode.get(ajeerCode) ?? [];
+      group.push({
+        row,
+        ajeerCodeFull,
+        name: clean(values.name) ?? '',
+        zimmedari: clean(values.zimmedari) ?? '',
+        district: clean(values.district) ?? '',
+      });
+      byCode.set(ajeerCode, group);
+    }
 
     const name = clean(values.name);
     if (!name) problems.push('Naam is missing');
@@ -161,6 +202,7 @@ export function validateRows(rows: RawRow[]): ImportPlan {
     valid.push({
       row,
       ajeerCode,
+      ajeerCodeFull,
       name,
       ...(hasUrduScript(name) ? { nameUr: name } : {}),
       ...(values.fatherName ? { fatherName: clean(values.fatherName)! } : {}),
@@ -172,7 +214,18 @@ export function validateRows(rows: RawRow[]): ImportPlan {
       ...(mobile ? { mobile } : {}),
     });
   }
-  return { valid, errors, warnings };
+  const sameCode = [...byCode]
+    .filter(([, list]) => list.length > 1)
+    .map(([ajeerCode, list]) => ({
+      ajeerCode,
+      rows: list.map((r) => ({ ...r, imported: valid.some((v) => v.row === r.row) })),
+    }));
+  const otherSuffix = [...byCode.values()]
+    .flat()
+    .filter((r) => /\/(?!1$)/.test(r.ajeerCodeFull))
+    .map((r) => ({ ...r, imported: valid.some((v) => v.row === r.row) }))
+    .sort((a, b) => a.row - b.row);
+  return { valid, errors, warnings, sameCode, otherSuffix };
 }
 
 interface UnitRef {
@@ -208,14 +261,20 @@ class UnitResolver {
     return existing ?? this.create('Pakistan', 'pakistan', null, 'PK');
   }
 
-  resolve(name: string, level: UnitLevel, parent: UnitRef): UnitRef {
-    const found = this.byParentAndKey.get(`${parent.code}|${unitKey(name)}`);
-    if (found) return found;
-    return this.create(
-      name.replace(LEVEL_WORDS, '').replace(/\s+/g, ' ').trim() || name,
-      level,
-      parent,
-    );
+  constructor(private readonly names?: DistrictNames) {}
+
+  /**
+   * Find the unit under `parent` by its name (or by its Roman name from district-names.csv);
+   * otherwise plan a new one. `urduChain` = the Urdu names from the suba down to this unit.
+   */
+  resolve(name: string, level: UnitLevel, parent: UnitRef, urduChain: string[]): UnitRef {
+    const roman = hasUrduScript(name) ? this.names?.romanFor(level, urduChain) : undefined;
+    for (const n of [name, roman]) {
+      const found = n && this.byParentAndKey.get(`${parent.code}|${unitKey(n)}`);
+      if (found) return found;
+    }
+    const bare = name.replace(LEVEL_WORDS, '').replace(/\s+/g, ' ').trim() || name;
+    return this.create(roman ?? bare, level, parent, undefined, roman ? bare : undefined);
   }
 
   private create(
@@ -223,6 +282,7 @@ class UnitResolver {
     level: UnitLevel,
     parent: UnitRef | null,
     fixedCode?: string,
+    urduName?: string,
   ): UnitRef {
     const latin =
       fixedCode ??
@@ -246,32 +306,38 @@ class UnitResolver {
     const ref: UnitRef = {
       code,
       name,
-      ...(/[\u0600-\u06FF]/.test(name) ? { nameUr: name } : {}),
+      ...(urduName ? { nameUr: urduName } : /[\u0600-\u06FF]/.test(name) ? { nameUr: name } : {}),
       level,
       parentCode: parent?.code ?? null,
       path: parent ? `${parent.path}/${code}` : code,
       isNew: true,
     };
     this.codes.add(code);
-    this.byParentAndKey.set(`${ref.parentCode ?? ''}|${unitKey(name)}`, ref);
+    for (const n of [name, urduName]) {
+      if (n) this.byParentAndKey.set(`${ref.parentCode ?? ''}|${unitKey(n)}`, ref);
+    }
     this.created.push(ref);
     return ref;
   }
 
   /** The unit a user belongs to: their district, or their own unit for supervisors. */
   unitFor(row: ValidRow): UnitRef {
-    const suba = this.resolve(row.suba, 'suba', this.root());
+    const suba = this.resolve(row.suba, 'suba', this.root(), [row.suba]);
     if (row.role === 'suba') return suba;
-    const division = this.resolve(row.division!, 'division', suba);
+    const division = this.resolve(row.division!, 'division', suba, [row.suba, row.division!]);
     if (row.role === 'division') return division;
-    return this.resolve(row.district!, 'district', division);
+    return this.resolve(row.district!, 'district', division, [
+      row.suba,
+      row.division!,
+      row.district!,
+    ]);
   }
 }
 
-/** Plan and (unless dryRun) apply the import. */
+/** Plan and (unless dryRun) apply the import. New units get Roman names from district-names.csv. */
 export async function importEmployees(
   rows: RawRow[],
-  { dryRun }: { dryRun: boolean },
+  { dryRun, names = DistrictNames.load() }: { dryRun: boolean; names?: DistrictNames },
 ): Promise<ImportResult> {
   await connectDb();
   const plan = validateRows(rows);
@@ -298,7 +364,7 @@ export async function importEmployees(
     }
   }
 
-  const units = new UnitResolver();
+  const units = new UnitResolver(names);
   await units.load();
   const assignments = toImport.map((row) => ({ row, unit: units.unitFor(row) }));
 
@@ -310,6 +376,8 @@ export async function importEmployees(
     newUnits: units.created.map(({ code, name, level, path }) => ({ code, name, level, path })),
     errors: plan.errors.sort((a, b) => a.row - b.row),
     warnings: plan.warnings,
+    sameCode: plan.sameCode,
+    otherSuffix: plan.otherSuffix,
   };
   if (dryRun) return result;
 
@@ -336,9 +404,10 @@ export async function importEmployees(
           update: {
             $set: {
               name: row.name,
+              ajeerCodeFull: row.ajeerCodeFull,
               ...(row.nameUr ? { nameUr: row.nameUr } : {}),
               ...(row.fatherName ? { fatherName: row.fatherName } : {}),
-              ...(row.mobile ? { mobile: row.mobile } : {}),
+              ...(row.mobile ? { mobile: row.mobile, mobileVerified: true } : {}),
               role: row.role,
               ...(row.zimmedari ? { zimmedari: row.zimmedari } : {}),
               unitCode: unit.code,
@@ -359,4 +428,58 @@ export async function importEmployees(
     );
   }
   return result;
+}
+
+/** Excel report for the CTO (kept in backend/private/, never committed). */
+export async function writeEmployeeReport(result: ImportResult, file: string): Promise<void> {
+  const wb = new ExcelJS.Workbook();
+  const sheet = (name: string, columns: string[], rows: (string | number)[][]) => {
+    const ws = wb.addWorksheet(name);
+    ws.addRow(columns).font = { bold: true };
+    for (const r of rows) ws.addRow(r);
+    ws.columns.forEach((c) => (c.width = 24));
+  };
+  sheet(
+    'Import nahi hue',
+    ['Row', 'Ajeer code', 'Masla'],
+    result.errors.map((e) => [e.row, e.ajeerCode ?? '', e.message]),
+  );
+  sheet(
+    'Tawajjuh',
+    ['Row', 'Ajeer code', 'Baat'],
+    result.warnings.map((w) => [w.row, w.ajeerCode ?? '', w.message]),
+  );
+  sheet(
+    'Aik code - 1 aur 2',
+    ['Login code', 'Row', 'Poora code', 'Naam', 'Zimmedari', 'District', 'Import hua?'],
+    result.sameCode.flatMap((g) =>
+      g.rows.map((r) => [
+        g.ajeerCode,
+        r.row,
+        r.ajeerCodeFull,
+        r.name,
+        r.zimmedari,
+        r.district,
+        r.imported ? 'haan' : 'nahi',
+      ]),
+    ),
+  );
+  sheet(
+    'Code 2, 3',
+    ['Row', 'Poora code', 'Naam', 'Zimmedari', 'District', 'Import hua?'],
+    result.otherSuffix.map((r) => [
+      r.row,
+      r.ajeerCodeFull,
+      r.name,
+      r.zimmedari,
+      r.district,
+      r.imported ? 'haan' : 'nahi',
+    ]),
+  );
+  sheet(
+    'Naye units',
+    ['Level', 'Naam', 'Path'],
+    result.newUnits.map((u) => [u.level, u.name, u.path]),
+  );
+  await wb.xlsx.writeFile(file);
 }
