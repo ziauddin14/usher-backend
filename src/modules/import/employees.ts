@@ -1,38 +1,62 @@
 // Employee list import (Excel). Real data lives only in backend/private/ (git-ignored).
 // Upsert by Ajeer Code; new units are created on the fly; existing passwords are never touched.
 import bcrypt from 'bcryptjs';
-import ExcelJS from 'exceljs';
 import { connectDb } from '../../lib/db.js';
+import { normalizeAjeerCode } from '../../lib/ajeer-code.js';
 import { normalizeMobile } from '../../lib/mobile.js';
+import { LEVEL_WORDS, unitKey } from '../../lib/unit-name.js';
+import { headerKey, loadWorkbook, readRows } from '../../lib/xlsx.js';
 import { Unit, type UnitLevel } from '../../models/unit.js';
 import { type Role, User, type Zimmedari } from '../../models/user.js';
 import { INITIAL_PASSWORD } from '../auth/schemas.js';
 import { BCRYPT_COST } from '../auth/service.js';
 
-/** Columns we read (header text, case and spacing ignored). */
+/**
+ * Columns we read. Header text is compared with headerKey() (case, spaces and punctuation
+ * ignored). English names from the spec + the Urdu headers of the department export.
+ */
 const COLUMNS = {
-  ajeerCode: ['ajeercode', 'ajeer', 'code'],
-  name: ['naam', 'name'],
-  fatherName: ['walid', 'waldiyat', 'fathername', 'father'],
-  zimmedari: ['zimmedari', 'role'],
-  suba: ['suba', 'province'],
-  division: ['division'],
-  district: ['district', 'zila'],
-  mobile: ['mobile', 'mobileno', 'mobilenumber', 'phone'],
+  ajeerCode: ['Ajeer Code', 'Ajeer', 'Code', 'عملہ کوڈ', 'اجیر کوڈ'],
+  name: ['Naam', 'Name', 'نام'],
+  fatherName: ['Walid', 'Waldiyat', 'Father Name', 'Father', 'ولدیت', 'والد'],
+  zimmedari: ['Zimmedari', 'Role', 'ذمہ داری'],
+  suba: ['Suba', 'Province', 'صوبائی/انتظامی اکائی', 'صوبہ'],
+  division: ['Division', 'سرکاری ڈویژن', 'ڈویژن'],
+  district: ['District', 'Zila', 'ڈسٹرکٹ', 'ضلع'],
+  mobile: ['Mobile', 'Mobile No', 'Mobile Number', 'Phone', 'موبائل', 'موبائل نمبر'],
 } as const;
 type Column = keyof typeof COLUMNS;
+const COLUMN_KEYS = Object.fromEntries(
+  Object.entries(COLUMNS).map(([c, names]) => [c, (names as readonly string[]).map(headerKey)]),
+) as Record<Column, string[]>;
 
-const ZIMMEDARI_MAP: Record<string, { role: Role; zimmedari?: Zimmedari }> = {
-  ushar: { role: 'zimmedar', zimmedari: 'ushar' },
-  usharzimmedar: { role: 'zimmedar', zimmedari: 'ushar' },
-  tehsiltown: { role: 'zimmedar', zimmedari: 'tehsil_town' },
-  tehsil: { role: 'zimmedar', zimmedari: 'tehsil_town' },
-  town: { role: 'zimmedar', zimmedari: 'tehsil_town' },
-  event: { role: 'zimmedar', zimmedari: 'event' },
-  district: { role: 'district' },
-  division: { role: 'division' },
-  suba: { role: 'suba' },
-};
+/**
+ * Zimmedari text → role. English values from the spec; Urdu values seen in the department
+ * export. Rows with any other value are rejected and listed in the report (ask the CTO).
+ */
+const ZIMMEDARI_MAP: Record<string, { role: Role; zimmedari?: Zimmedari }> = Object.fromEntries(
+  (
+    [
+      ['Ushar', { role: 'zimmedar', zimmedari: 'ushar' }],
+      ['Ushar Zimmedar', { role: 'zimmedar', zimmedari: 'ushar' }],
+      ['Tehsil-Town', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
+      ['Tehsil', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
+      ['Town', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
+      ['Event', { role: 'zimmedar', zimmedari: 'event' }],
+      ['District', { role: 'district' }],
+      ['Division', { role: 'division' }],
+      ['Suba', { role: 'suba' }],
+      ['اسسٹینٹ عشر ذمہ دار', { role: 'zimmedar', zimmedari: 'ushar' }],
+      ['عشر ذمہ دار', { role: 'zimmedar', zimmedari: 'ushar' }],
+      ['ٹاؤن /تحصیل ذمہ دار', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
+      ['ایونٹ عشر ذمہ دار', { role: 'zimmedar', zimmedari: 'event' }],
+      ['ڈسٹرکٹ ذمہ دار', { role: 'district' }],
+      ['سرکاری ڈویژن ذمہ دار', { role: 'division' }],
+      ['ڈویژن عشر ذمہ دار', { role: 'division' }],
+      ['صوبائی ذمہ دار', { role: 'suba' }],
+    ] as const
+  ).map(([text, mapped]) => [headerKey(text), mapped]),
+);
 
 export interface RawRow {
   row: number;
@@ -75,45 +99,12 @@ export interface ImportResult {
   warnings: RowProblem[];
 }
 
-const key = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 const clean = (s: string | undefined) => s?.replace(/\s+/g, ' ').trim() || undefined;
 const hasUrduScript = (s: string) => /[؀-ۿ]/.test(s);
 
-/** Read the first worksheet; the first row that names an "Ajeer Code" column is the header. */
+/** Read the first worksheet that has an "Ajeer Code" column (title rows above it are skipped). */
 export async function readEmployeeSheet(file: string): Promise<RawRow[]> {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(file);
-  const sheet = workbook.worksheets[0];
-  if (!sheet) throw new Error('The workbook has no worksheet');
-
-  let header: Map<number, Column> | undefined;
-  const rows: RawRow[] = [];
-  sheet.eachRow({ includeEmpty: false }, (excelRow, rowNumber) => {
-    const texts = new Map<number, string>();
-    excelRow.eachCell({ includeEmpty: false }, (cell, col) => {
-      texts.set(col, cell.text.trim());
-    });
-    if (!header) {
-      const found = new Map<number, Column>();
-      for (const [col, text] of texts) {
-        const k = key(text);
-        const column = (Object.keys(COLUMNS) as Column[]).find((c) =>
-          (COLUMNS[c] as readonly string[]).includes(k),
-        );
-        if (column) found.set(col, column);
-      }
-      if ([...found.values()].includes('ajeerCode')) header = found;
-      return;
-    }
-    const values: Partial<Record<Column, string>> = {};
-    for (const [col, column] of header) {
-      const text = texts.get(col);
-      if (text) values[column] = text;
-    }
-    if (Object.keys(values).length > 0) rows.push({ row: rowNumber, values });
-  });
-  if (!header) throw new Error('Header row with an "Ajeer Code" column not found');
-  return rows;
+  return readRows(await loadWorkbook(file), COLUMN_KEYS, 'ajeerCode');
 }
 
 /** Validate rows. Errors skip the row; warnings import it but need attention. */
@@ -124,17 +115,19 @@ export function validateRows(rows: RawRow[]): ImportPlan {
   const seen = new Set<string>();
 
   for (const { row, values } of rows) {
-    const ajeerCode = (values.ajeerCode ?? '').replace(/\s/g, '');
+    const ajeerCode = normalizeAjeerCode(values.ajeerCode) ?? '';
     const problems: string[] = [];
-    if (!/^\d{3,9}$/.test(ajeerCode)) problems.push('Ajeer Code must be 3–9 digits');
+    if (!ajeerCode) problems.push('Ajeer Code must be 3–9 digits (optionally followed by /n)');
     else if (seen.has(ajeerCode)) problems.push('Ajeer Code appears twice in the file');
 
     const name = clean(values.name);
     if (!name) problems.push('Naam is missing');
 
-    const mapped = ZIMMEDARI_MAP[key(values.zimmedari ?? '')];
+    const mapped = ZIMMEDARI_MAP[headerKey(values.zimmedari ?? '')];
     if (!mapped) {
-      problems.push('Zimmedari must be one of Ushar, Tehsil-Town, Event, District, Division, Suba');
+      problems.push(
+        `Zimmedari "${values.zimmedari ?? ''}" is not a Demo v1 role (Ushar, Tehsil-Town, Event, District, Division, Suba)`,
+      );
     }
 
     const suba = clean(values.suba);
@@ -154,6 +147,7 @@ export function validateRows(rows: RawRow[]): ImportPlan {
 
     if (problems.length > 0 || !mapped || !name || !suba) {
       errors.push({ row, ...(ajeerCode ? { ajeerCode } : {}), message: problems.join('; ') });
+      if (ajeerCode) seen.add(ajeerCode);
       continue;
     }
     seen.add(ajeerCode);
@@ -181,12 +175,10 @@ export function validateRows(rows: RawRow[]): ImportPlan {
   return { valid, errors, warnings };
 }
 
-const LEVEL_WORDS = /\b(suba|province|division|div|district|dist|zila)\b/gi;
-const unitKey = (name: string) => key(name.replace(LEVEL_WORDS, ''));
-
 interface UnitRef {
   code: string;
   name: string;
+  nameUr?: string | null;
   level: UnitLevel;
   parentCode: string | null;
   path: string;
@@ -200,10 +192,13 @@ class UnitResolver {
   readonly created: UnitRef[] = [];
 
   async load(): Promise<void> {
-    const units = await Unit.find().select('code name level parentCode path').lean();
+    const units = await Unit.find().select('code name nameUr level parentCode path').lean();
     for (const u of units) {
       const ref: UnitRef = { ...u, parentCode: u.parentCode ?? null, isNew: false };
-      this.byParentAndKey.set(`${ref.parentCode ?? ''}|${unitKey(u.name)}`, ref);
+      // Match by the Roman and the Urdu name (the department export uses Urdu names).
+      for (const n of [u.name, u.nameUr]) {
+        if (n) this.byParentAndKey.set(`${ref.parentCode ?? ''}|${unitKey(n)}`, ref);
+      }
       this.codes.add(u.code);
     }
   }
@@ -229,20 +224,29 @@ class UnitResolver {
     parent: UnitRef | null,
     fixedCode?: string,
   ): UnitRef {
-    const base =
+    const latin =
       fixedCode ??
-      (name
+      name
         .toUpperCase()
         .replace(/[^A-Z0-9]+/g, '_')
-        .replace(/^_|_$/g, '') ||
-        'UNIT');
+        .replace(/^_|_$/g, '');
     const suffix = { pakistan: '', suba: '_SUBA', division: '_DIV', district: '_DIST' }[level];
-    let code = base;
-    if (this.codes.has(code)) code = `${base}${suffix}`;
-    for (let n = 2; this.codes.has(code); n += 1) code = `${base}${suffix}_${n}`;
+    let code: string;
+    if (latin) {
+      code = latin;
+      if (this.codes.has(code)) code = `${latin}${suffix}`;
+      for (let n = 2; this.codes.has(code); n += 1) code = `${latin}${suffix}_${n}`;
+    } else {
+      // Urdu-only name: a neutral code such as DIST_3 (the name is kept in name / nameUr).
+      const prefix = { pakistan: 'PK', suba: 'SUBA', division: 'DIV', district: 'DIST' }[level];
+      let n = 1;
+      while (this.codes.has(`${prefix}_${n}`)) n += 1;
+      code = `${prefix}_${n}`;
+    }
     const ref: UnitRef = {
       code,
       name,
+      ...(/[\u0600-\u06FF]/.test(name) ? { nameUr: name } : {}),
       level,
       parentCode: parent?.code ?? null,
       path: parent ? `${parent.path}/${code}` : code,
@@ -311,9 +315,10 @@ export async function importEmployees(
 
   if (units.created.length > 0) {
     await Unit.insertMany(
-      units.created.map(({ code, name, level, parentCode, path }) => ({
+      units.created.map(({ code, name, nameUr, level, parentCode, path }) => ({
         code,
         name,
+        ...(nameUr ? { nameUr } : {}),
         level,
         parentCode,
         path,

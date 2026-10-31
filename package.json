@@ -17,7 +17,8 @@
     "test": "vitest run",
     "seed": "tsx --env-file-if-exists=.env scripts/seed.ts",
     "backup": "tsx --env-file-if-exists=.env scripts/backup.ts",
-    "import:employees": "tsx --env-file-if-exists=.env scripts/import-employees.ts"
+    "import:employees": "tsx --env-file-if-exists=.env scripts/import-employees.ts",
+    "import:villages": "tsx --env-file-if-exists=.env scripts/import-villages.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -27,6 +28,7 @@
     "express-rate-limit": "^8.7.2",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
+    "jszip": "^3.10.2",
     "mongoose": "^9.11.4",
     "zod": "^4.6.7"
   },
