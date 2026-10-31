@@ -12,19 +12,30 @@ export interface VillageItem {
   id: string;
   name: string;
   status: 'approved' | 'pending';
+  /** Assigned to the caller (zimmedar: "آپ کے گاؤں"). */
+  mine: boolean;
   /** Last date the caller visited it (zimmedar), or null. */
   lastVisitDate: string | null;
 }
 
 /**
- * Villages the caller can choose: approved villages in scope + the caller's own pending ones.
- * For a zimmedar the scope is their district; most recently visited first.
+ * Villages the caller can choose.
+ * Zimmedar, no search: only the villages assigned to them (+ their own pending ones).
+ * Zimmedar, with search: all approved villages of their district that match, own villages first.
+ * Supervisors: approved villages in scope (+ their own pending ones).
+ * Inside each group: most recently visited first, then by name.
  */
 export async function listVillages(user: AuthUser, q?: string): Promise<VillageItem[]> {
   await connectDb();
+  const me = new Types.ObjectId(user.id);
+  const isZimmedar = user.role === 'zimmedar';
+  const own = [
+    { assignedTo: me, status: { $in: ['approved', 'pending'] } },
+    { addedBy: me, status: 'pending' },
+  ];
   const filter: Record<string, unknown> = {
     ...scopeFilter(user),
-    $or: [{ status: 'approved' }, { status: 'pending', addedBy: new Types.ObjectId(user.id) }],
+    $or: isZimmedar && !q ? own : [...own, { status: 'approved' }],
   };
   if (q) {
     const key = villageNameKey(q);
@@ -38,15 +49,15 @@ export async function listVillages(user: AuthUser, q?: string): Promise<VillageI
     ];
   }
   const villages = await Village.find(filter)
-    .select('name status')
+    .select('name status assignedTo')
     .sort({ nameKey: 1 })
-    .limit(300)
+    .limit(q ? 100 : 300)
     .lean();
 
   const lastVisits = new Map<string, string>();
-  if (user.role === 'zimmedar' && villages.length > 0) {
+  if (isZimmedar && villages.length > 0) {
     const rows = await Jadwal.aggregate<{ _id: Types.ObjectId; last: string }>([
-      { $match: { userId: new Types.ObjectId(user.id) } },
+      { $match: { userId: me } },
       { $unwind: '$visits' },
       { $group: { _id: '$visits.villageId', last: { $max: '$date' } } },
     ]);
@@ -58,9 +69,14 @@ export async function listVillages(user: AuthUser, q?: string): Promise<VillageI
       id: String(v._id),
       name: v.name,
       status: v.status as 'approved' | 'pending',
+      mine: String(v.assignedTo) === user.id,
       lastVisitDate: lastVisits.get(String(v._id)) ?? null,
     }))
-    .sort((a, b) => (b.lastVisitDate ?? '').localeCompare(a.lastVisitDate ?? ''));
+    .sort(
+      (a, b) =>
+        Number(b.mine) - Number(a.mine) ||
+        (b.lastVisitDate ?? '').localeCompare(a.lastVisitDate ?? ''),
+    );
 }
 
 /**
@@ -88,6 +104,8 @@ export async function addVillage(user: AuthUser, name: string): Promise<VillageI
     unitPath: user.unitPath,
     status: 'pending',
     addedBy: new Types.ObjectId(user.id),
+    // The adder is responsible for it until the District says otherwise.
+    assignedTo: new Types.ObjectId(user.id),
   });
   await audit({
     action: 'VILLAGE_ADD',
@@ -98,7 +116,13 @@ export async function addVillage(user: AuthUser, name: string): Promise<VillageI
     unitPath: user.unitPath,
     details: { name: village.name },
   });
-  return { id: String(village._id), name: village.name, status: 'pending', lastVisitDate: null };
+  return {
+    id: String(village._id),
+    name: village.name,
+    status: 'pending',
+    mine: true,
+    lastVisitDate: null,
+  };
 }
 
 /** A village the zimmedar may put in a jadwal: approved in their district, or their own pending one. */
@@ -107,7 +131,11 @@ export async function findUsableVillage(user: AuthUser, villageId: string) {
   return Village.findOne({
     _id: villageId,
     unitPath: user.unitPath,
-    $or: [{ status: 'approved' }, { status: 'pending', addedBy: new Types.ObjectId(user.id) }],
+    $or: [
+      { status: 'approved' },
+      { status: 'pending', addedBy: new Types.ObjectId(user.id) },
+      { status: 'pending', assignedTo: new Types.ObjectId(user.id) },
+    ],
   })
     .select('name')
     .lean();

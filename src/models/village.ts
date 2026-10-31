@@ -11,6 +11,8 @@ const villageSchema = new Schema(
     tehsil: { type: String },
     status: { type: String, enum: VILLAGE_STATUS, required: true, default: 'pending' },
     mergedInto: { type: Schema.Types.ObjectId, ref: 'Village' },
+    /** The Ushar Zimmedar responsible for this village (from the village list import, or the adder). */
+    assignedTo: { type: Schema.Types.ObjectId, ref: 'User' },
     addedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     approvedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     approvedAt: { type: Date },
@@ -24,6 +26,7 @@ villageSchema.index(
   { unique: true, partialFilterExpression: { status: { $in: ['approved', 'pending'] } } },
 );
 villageSchema.index({ addedBy: 1, status: 1 });
+villageSchema.index({ assignedTo: 1, status: 1 });
 
 export type VillageDoc = InferSchemaType<typeof villageSchema>;
 

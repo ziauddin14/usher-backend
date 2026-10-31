@@ -24,7 +24,7 @@ type JadwalDocument = HydratedDocument<JadwalDoc>;
 type Step = 'donors' | 'atiyat' | 'ijtima' | 'mashwara';
 
 const isDuplicateKey = (e: unknown) =>
-  typeof e === 'object' && e !== null && 'code' in e && (e).code === 11000;
+  typeof e === 'object' && e !== null && 'code' in e && e.code === 11000;
 
 /** API shape of a jadwal: ids as strings, no internal fields. */
 export function serializeJadwal(doc: JadwalDocument) {

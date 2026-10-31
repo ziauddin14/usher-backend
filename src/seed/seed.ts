@@ -1,3 +1,4 @@
+import type { Types } from 'mongoose';
 import bcrypt from 'bcryptjs';
 import { connectDb } from '../lib/db.js';
 import { clearSettingsCache } from '../lib/settings.js';
@@ -26,6 +27,52 @@ const ALL_MODELS = [Unit, User, Village, Jadwal, Setting, AuditLog, PasswordRese
 const DEMO_MOBILE = '03000000000';
 
 const LIVE_STATUSES: ('approved' | 'pending')[] = ['approved', 'pending'];
+
+/**
+ * Like the real village list: every approved village belongs to one Ushar Zimmedar of its
+ * district. Round-robin in name order (the demo zimmedar 90412 first); villages that already
+ * have someone keep them.
+ */
+async function assignSeedVillages(): Promise<void> {
+  const zimmedaran = await User.find({ role: 'zimmedar', isDemo: true })
+    .select('_id ajeerCode unitPath')
+    .sort({ ajeerCode: 1 })
+    .lean();
+  const byDistrict = new Map<string, typeof zimmedaran>();
+  for (const z of zimmedaran) {
+    const list = byDistrict.get(z.unitPath) ?? [];
+    if (z.ajeerCode === '90412') list.unshift(z);
+    else list.push(z);
+    byDistrict.set(z.unitPath, list);
+  }
+  const ops: {
+    updateOne: {
+      filter: { _id: Types.ObjectId };
+      update: { $set: { assignedTo: Types.ObjectId } };
+    };
+  }[] = [];
+  for (const [unitPath, list] of byDistrict) {
+    const villages = await Village.find({ unitPath, status: 'approved' })
+      .select('_id assignedTo')
+      .sort({ nameKey: 1 })
+      .lean();
+    // The demo zimmedar gets 5 villages (as in design A4); the rest are shared round-robin.
+    const demoFirst = list[0]?.ajeerCode === '90412' && list.length > 1;
+    villages.forEach((v, i) => {
+      const owner = demoFirst
+        ? i < 5
+          ? list[0]!
+          : list[1 + ((i - 5) % (list.length - 1))]!
+        : list[i % list.length]!;
+      if (!v.assignedTo) {
+        ops.push({
+          updateOne: { filter: { _id: v._id }, update: { $set: { assignedTo: owner._id } } },
+        });
+      }
+    });
+  }
+  if (ops.length > 0) await Village.bulkWrite(ops);
+}
 
 export interface SeedResult {
   units: number;
@@ -121,6 +168,7 @@ export async function seedDemo({ reset = false } = {}): Promise<SeedResult> {
     }),
   );
   await Village.bulkWrite(villageOps);
+  await assignSeedVillages();
 
   // TODO(Step 3): seed jadwal history 1 Jun 2026 → yesterday (data model "Seed" → Jadwals),
   // including the exact monthly reward-wusooli for 90412.

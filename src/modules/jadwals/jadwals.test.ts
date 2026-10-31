@@ -139,10 +139,21 @@ describe('starting a day', () => {
 });
 
 describe('villages and visits', () => {
-  it('lists district villages, most recently visited first', async () => {
-    const res = await api(arif).get('/villages').expect(200);
-    expect(res.body.villages).toHaveLength(villageIds.length);
-    expect(res.body.villages[0]).toMatchObject({ status: 'approved', lastVisitDate: null });
+  it('without a search lists only “آپ کے گاؤں” (assigned); a search also finds the district’s other villages', async () => {
+    const mine = (await api(arif).get('/villages').expect(200)).body.villages as {
+      mine: boolean;
+    }[];
+    expect(mine).toHaveLength(5); // seed: the demo zimmedar has 5 villages
+    expect(mine.every((v) => v.mine)).toBe(true);
+
+    const all = (
+      await api(arif)
+        .get('/villages?q=' + encodeURIComponent('گوٹھ'))
+        .expect(200)
+    ).body.villages as { mine: boolean }[];
+    expect(all).toHaveLength(villageIds.length);
+    expect(all.slice(0, 5).every((v) => v.mine)).toBe(true); // own villages first
+    expect(all.slice(5).some((v) => v.mine)).toBe(false);
   });
 
   it('adds a pending village usable by the adder only; duplicate name → 409 VILLAGE_EXISTS', async () => {
