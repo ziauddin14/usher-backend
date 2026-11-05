@@ -10,4 +10,6 @@ export const listUsersQuery = z.object({
   mobileStatus: z.enum(['verified', 'unverified', 'none']).optional(),
 });
 
+export const statusSchema = z.object({ isActive: z.boolean() });
+
 export const userIdParams = z.object({ id: z.string().regex(/^[a-f0-9]{24}$/i) });

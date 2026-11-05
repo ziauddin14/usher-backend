@@ -216,3 +216,30 @@ export async function viewPendingMobile(caller: AuthUser, userId: string): Promi
   });
   return target.mobile;
 }
+
+/**
+ * POST /users/:id/status { isActive } — a supervisor activates / deactivates a lower-level user in
+ * scope. A deactivated user's sessions stop at once (every request re-reads isActive). Audit
+ * USER_STATUS.
+ */
+export async function setUserStatus(caller: AuthUser, userId: string, isActive: boolean) {
+  await connectDb();
+  const target = Types.ObjectId.isValid(userId)
+    ? await User.findById(userId).select('ajeerCode role unitPath isActive').lean()
+    : null;
+  assertInScope(caller, target);
+  if (ROLE_RANK[target.role] >= ROLE_RANK[caller.role]) {
+    throw new AppError(403, 'FORBIDDEN', 'Only users below your level');
+  }
+  if (target.isActive === isActive) return;
+  await User.updateOne({ _id: target._id }, { $set: { isActive } });
+  await audit({
+    action: 'USER_STATUS',
+    actorId: caller.id,
+    actorAjeerCode: caller.ajeerCode,
+    targetType: 'user',
+    targetId: String(target._id),
+    unitPath: target.unitPath,
+    details: { targetAjeerCode: target.ajeerCode, isActive },
+  });
+}
