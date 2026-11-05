@@ -50,6 +50,8 @@ export async function publicUser(user: AuthUser): Promise<PublicUser> {
 /**
  * Check Ajeer Code + password. While the user still has the initial password
  * (mustChangePassword) the registered mobile must match too.
+ * A self-entered mobile (no number on record) is saved as "tasdeeq baqi" and the login stops with
+ * 403 MOBILE_PENDING until the District confirms it (CTO 5 Nov 2026) — no session before that.
  * Every attempt is audit-logged (never the password, never the full mobile).
  */
 export async function login(
@@ -104,10 +106,15 @@ export async function login(
         unitPath: user.unitPath,
         details: { mobile: maskMobile(typed) },
       });
+      throw mobilePending();
     } else if (typed !== user.mobile) {
       await failed('mobile_mismatch');
       throw new AppError(401, 'MOBILE_MISMATCH', 'Mobile number does not match');
     }
+  }
+  if (user.mobileVerified === false) {
+    await failed('mobile_pending');
+    throw mobilePending();
   }
 
   await User.updateOne({ _id: user._id }, { $set: { lastLoginAt: new Date() } });
@@ -129,9 +136,13 @@ export async function login(
     unitCode: user.unitCode,
     unitPath: user.unitPath,
     mustChangePassword: user.mustChangePassword,
+    sessionVersion: user.sessionVersion ?? 0,
   };
   return authUser;
 }
+
+const mobilePending = () =>
+  new AppError(403, 'MOBILE_PENDING', 'Mobile number waits for District confirmation');
 
 export async function changePassword(
   user: AuthUser,
@@ -177,9 +188,11 @@ export async function changePassword(
 export async function requestPasswordReset(ajeerCode: string, mobile: string): Promise<void> {
   await connectDb();
   const user = await User.findOne({ ajeerCode, isActive: true })
-    .select('ajeerCode name nameUr role unitCode unitPath mobile')
+    .select('ajeerCode name nameUr role unitCode unitPath mobile mobileVerified')
     .lean();
-  if (!user?.mobile || normalizeMobile(mobile) !== user.mobile) return;
+  // A self-entered number still waiting for the District is not a registered number.
+  if (!user?.mobile || user.mobileVerified === false) return;
+  if (normalizeMobile(mobile) !== user.mobile) return;
 
   const existing = await PasswordResetRequest.exists({ userId: user._id, status: 'pending' });
   if (existing) return;
@@ -210,7 +223,11 @@ export async function resetToInitialPassword(
   target: { _id: Types.ObjectId; ajeerCode: string; unitPath: string },
 ): Promise<void> {
   const passwordHash = await bcrypt.hash(INITIAL_PASSWORD, BCRYPT_COST);
-  await User.updateOne({ _id: target._id }, { $set: { passwordHash, mustChangePassword: true } });
+  // Bumping sessionVersion ends every session issued before the reset (CTO 5 Nov 2026).
+  await User.updateOne(
+    { _id: target._id },
+    { $set: { passwordHash, mustChangePassword: true }, $inc: { sessionVersion: 1 } },
+  );
   const closed = await PasswordResetRequest.updateMany(
     { userId: target._id, status: 'pending' },
     { $set: { status: 'done', resolvedAt: new Date(), resolvedBy: new Types.ObjectId(actor.id) } },

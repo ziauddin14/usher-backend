@@ -2,7 +2,13 @@ import { Router } from 'express';
 import { currentUser, requireAuth, requireRole, SUPERVISOR_ROLES } from '../../lib/auth.js';
 import { parse } from '../../lib/errors.js';
 import { listUsersQuery, userIdParams } from './schemas.js';
-import { confirmMobile, listResetRequests, listUsers, resetPassword } from './service.js';
+import {
+  confirmMobile,
+  listResetRequests,
+  listUsers,
+  rejectMobile,
+  resetPassword,
+} from './service.js';
 
 export function usersRouter(): Router {
   const router = Router();
@@ -26,6 +32,12 @@ export function usersRouter(): Router {
   router.post('/:id/confirm-mobile', async (req, res) => {
     const { id } = parse(userIdParams, req.params);
     await confirmMobile(currentUser(req), id);
+    res.json({ ok: true });
+  });
+
+  router.post('/:id/reject-mobile', async (req, res) => {
+    const { id } = parse(userIdParams, req.params);
+    await rejectMobile(currentUser(req), id);
     res.json({ ok: true });
   });
 

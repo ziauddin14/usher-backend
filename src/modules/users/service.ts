@@ -130,11 +130,43 @@ export async function confirmMobile(caller: AuthUser, userId: string): Promise<v
     throw new AppError(403, 'FORBIDDEN', 'Only users below your level can be confirmed');
   }
   if (!target.mobile) throw new AppError(409, 'CONFLICT', 'This user has no mobile number yet');
-  if (target.mobileVerified === false) {
-    await User.updateOne({ _id: target._id }, { $set: { mobileVerified: true } });
+  if (target.mobileVerified !== false) {
+    throw new AppError(409, 'CONFLICT', 'This mobile number is already confirmed');
   }
+  await User.updateOne({ _id: target._id }, { $set: { mobileVerified: true } });
   await audit({
     action: 'MOBILE_CONFIRM',
+    actorId: caller.id,
+    actorAjeerCode: caller.ajeerCode,
+    targetType: 'user',
+    targetId: String(target._id),
+    unitPath: target.unitPath,
+    details: { targetAjeerCode: target.ajeerCode, mobile: maskMobile(target.mobile) },
+  });
+}
+
+/**
+ * District (or above) rejects a number the user typed at the first login: the number is removed
+ * (the user types the right one at the next login) and any session ends. Audit MOBILE_REJECT.
+ */
+export async function rejectMobile(caller: AuthUser, userId: string): Promise<void> {
+  await connectDb();
+  const target = Types.ObjectId.isValid(userId)
+    ? await User.findById(userId).select('ajeerCode role unitPath mobile mobileVerified').lean()
+    : null;
+  assertInScope(caller, target);
+  if (ROLE_RANK[target.role] >= ROLE_RANK[caller.role]) {
+    throw new AppError(403, 'FORBIDDEN', 'Only users below your level can be rejected');
+  }
+  if (!target.mobile || target.mobileVerified !== false) {
+    throw new AppError(409, 'CONFLICT', 'This user has no mobile number waiting for confirmation');
+  }
+  await User.updateOne(
+    { _id: target._id },
+    { $unset: { mobile: 1, mobileVerified: 1 }, $inc: { sessionVersion: 1 } },
+  );
+  await audit({
+    action: 'MOBILE_REJECT',
     actorId: caller.id,
     actorAjeerCode: caller.ajeerCode,
     targetType: 'user',

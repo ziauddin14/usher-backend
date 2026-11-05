@@ -22,7 +22,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  await useLiveDb();
+  await useLiveDb({ dryRun });
   const path = resolve(file);
   const result = await importMobiles(await readMobileSheet(path), { dryRun });
 

@@ -186,6 +186,35 @@ describe('employee import', () => {
 
   it('is idempotent: a second run updates, creates nothing new', async () => {
     const result = await importEmployees(await readEmployeeSheet(file), { dryRun: false });
-    expect(result).toMatchObject({ created: 0, updated: 4, newUnits: [] });
+    expect(result).toMatchObject({ created: 0, updated: 4, newUnits: [], mobileConflicts: [] });
+  });
+
+  it('never overwrites a mobile on record; a different file number is reported', async () => {
+    // 880001 typed another number at the first login (pending); 880002 lost its number.
+    await User.updateOne(
+      { ajeerCode: '880001' },
+      { $set: { mobile: '03009998877', mobileVerified: false } },
+    );
+    await User.updateOne({ ajeerCode: '880002' }, { $unset: { mobile: '', mobileVerified: '' } });
+
+    const dry = await importEmployees(await readEmployeeSheet(file), { dryRun: true });
+    expect(dry.mobileConflicts).toEqual([
+      expect.objectContaining({
+        ajeerCode: '880001',
+        onRecord: '03009998877',
+        inFile: '03001112233',
+      }),
+    ]);
+    const result = await importEmployees(await readEmployeeSheet(file), { dryRun: false });
+    expect(result.mobileConflicts.map((c) => c.ajeerCode)).toEqual(['880001']);
+    expect(await User.findOne({ ajeerCode: '880001' }).lean()).toMatchObject({
+      mobile: '03009998877',
+      mobileVerified: false,
+    });
+    // A missing number is still filled from the file.
+    expect(await User.findOne({ ajeerCode: '880002' }).lean()).toMatchObject({
+      mobile: '03001112244',
+      mobileVerified: true,
+    });
   });
 });

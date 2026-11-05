@@ -14,6 +14,7 @@ export const AUDIT_ACTIONS = [
   'PASSWORD_CHANGE',
   'MOBILE_SELF_REGISTER',
   'MOBILE_CONFIRM',
+  'MOBILE_REJECT',
   'USER_STATUS',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

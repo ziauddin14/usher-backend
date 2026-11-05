@@ -74,11 +74,15 @@ async function ownDraft(user: AuthUser, id: string): Promise<JadwalDocument> {
   return doc;
 }
 
-/** Today's jadwal (Karachi date) or null, plus the last bike meter reading as a hint. */
+/**
+ * Today's jadwal (Karachi date) or null, the last bike meter reading as a hint, and the user's
+ * unfinished drafts of earlier dates (back-dated or reopened by the District) so Home can offer
+ * them on any device.
+ */
 export async function todayJadwal(user: AuthUser) {
   await connectDb();
   const today = karachiDate();
-  const [doc, lastBike] = await Promise.all([
+  const [doc, lastBike, earlier] = await Promise.all([
     Jadwal.findOne({ userId: userOid(user), date: today }),
     Jadwal.findOne({
       userId: userOid(user),
@@ -89,11 +93,21 @@ export async function todayJadwal(user: AuthUser) {
       .sort({ date: -1 })
       .select('travel.meterEnd')
       .lean(),
+    Jadwal.find({ userId: userOid(user), status: 'draft', date: { $lt: today } })
+      .sort({ date: -1 })
+      .limit(10)
+      .select('date visits._id')
+      .lean(),
   ]);
   return {
     today,
     jadwal: doc ? serializeJadwal(doc) : null,
     lastMeterEnd: lastBike?.travel?.meterEnd ?? null,
+    otherDrafts: earlier.map((d) => ({
+      id: String(d._id),
+      date: d.date,
+      villages: d.visits.length,
+    })),
   };
 }
 
@@ -290,7 +304,8 @@ async function auditSubmit(user: AuthUser, doc: JadwalDocument) {
     targetType: 'jadwal',
     targetId: String(doc._id),
     unitPath: doc.unitPath,
-    details: { date: doc.date, entryType: doc.entryType },
+    // A day submitted after its own date is marked back-dated (CTO 5 Nov 2026).
+    details: { date: doc.date, entryType: doc.entryType, backdated: doc.date < karachiDate() },
   });
 }
 

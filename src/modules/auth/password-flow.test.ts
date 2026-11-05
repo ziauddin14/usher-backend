@@ -54,21 +54,32 @@ describe('first login with the initial password 123', () => {
     expect(res.body.error.code).toBe('MOBILE_MISMATCH');
   });
 
-  it('without a number on record, keeps the typed one as "tasdeeq baqi" for the District', async () => {
+  it('without a number on record: saved as "tasdeeq baqi", no session until the District confirms', async () => {
     const bad = await login({ ajeerCode: noMobile, password: '123', mobile: '12345' }).expect(400);
     expect(bad.body.error.details.field).toBe('mobile');
 
-    await login({ ajeerCode: noMobile, password: '123', mobile: '0301 2223344' }).expect(200);
+    const first = await login({ ajeerCode: noMobile, password: '123', mobile: '0301 2223344' });
+    expect(first.status).toBe(403);
+    expect(first.body.error.code).toBe('MOBILE_PENDING');
+    expect(first.headers['set-cookie']).toBeUndefined(); // no session before confirmation
     const saved = await User.findOne({ ajeerCode: noMobile }).lean();
     expect(saved).toMatchObject({ mobile: '03012223344', mobileVerified: false });
     expect(
       await AuditLog.countDocuments({ action: 'MOBILE_SELF_REGISTER', actorAjeerCode: noMobile }),
     ).toBe(1);
-    // From now on that number is the one checked.
+    // From now on that number is the one checked; even the right one waits for the District.
     const other = await login({ ajeerCode: noMobile, password: '123', mobile: '03009999999' });
-    expect(other.status).toBe(401);
+    expect(other.body.error.code).toBe('MOBILE_MISMATCH');
+    const again = await login({ ajeerCode: noMobile, password: '123', mobile: '03012223344' });
+    expect(again.body.error.code).toBe('MOBILE_PENDING');
+    // A pending number is not a registered number for forgot-password either.
+    await request(app)
+      .post('/api/v1/auth/forgot-password')
+      .send({ ajeerCode: noMobile, mobile: '03012223344' })
+      .expect(200);
+    expect(await PasswordResetRequest.countDocuments({ ajeerCode: noMobile })).toBe(0);
 
-    // The District sees it as unverified and confirms it (audited).
+    // The District sees it as unverified and confirms it (audited); then the login goes on.
     const district = await loginCookie(app, '9040001');
     const list = await request(app)
       .get('/api/v1/users?mobileStatus=unverified')
@@ -84,6 +95,62 @@ describe('first login with the initial password 123', () => {
       .expect(200);
     expect((await User.findOne({ ajeerCode: noMobile }).lean())?.mobileVerified).toBe(true);
     expect(await AuditLog.countDocuments({ action: 'MOBILE_CONFIRM' })).toBe(1);
+    // Confirming twice is a conflict, not a second audit entry.
+    await request(app)
+      .post(`/api/v1/users/${row!.id}/confirm-mobile`)
+      .set('Cookie', district)
+      .expect(409);
+    const ok = await login({ ajeerCode: noMobile, password: '123', mobile: '03012223344' });
+    expect(ok.status).toBe(200);
+    expect(ok.body.user.mustChangePassword).toBe(true);
+  });
+
+  it('the District can reject a wrong self-entered number (audited); the user types it again', async () => {
+    const z = await User.findOne({
+      unitCode: 'GHOTKI',
+      role: 'zimmedar',
+      ajeerCode: { $nin: ['9090412', noMobile] },
+    }).lean();
+    await makeNewUser(z!.ajeerCode);
+    await login({ ajeerCode: z!.ajeerCode, password: '123', mobile: '03015556677' }).expect(403);
+
+    const district = await loginCookie(app, '9040001');
+    const other = await loginCookie(app, '9030001'); // division above: also allowed
+    // Out of scope → 404: a zimmedar of another district cannot be touched by Ghotki.
+    const outside = await User.findOne({ role: 'zimmedar', unitCode: { $ne: 'GHOTKI' } }).lean();
+    await request(app)
+      .post(`/api/v1/users/${String(outside!._id)}/reject-mobile`)
+      .set('Cookie', district)
+      .expect(404);
+    await request(app)
+      .post(`/api/v1/users/${String(z!._id)}/reject-mobile`)
+      .set('Cookie', district)
+      .expect(200);
+    const after = await User.findOne({ _id: z!._id }).lean();
+    expect(after?.mobile).toBeUndefined();
+    expect(after?.mobileVerified).toBeUndefined();
+    expect(
+      await AuditLog.countDocuments({ action: 'MOBILE_REJECT', targetId: String(z!._id) }),
+    ).toBe(1);
+    // Nothing left to reject.
+    await request(app)
+      .post(`/api/v1/users/${String(z!._id)}/reject-mobile`)
+      .set('Cookie', other)
+      .expect(409);
+    // The user can now type the right number (again pending).
+    const retry = await login({ ajeerCode: z!.ajeerCode, password: '123', mobile: '03017778899' });
+    expect(retry.body.error.code).toBe('MOBILE_PENDING');
+  });
+
+  it('a user whose mobile is still pending cannot use an older session', async () => {
+    const z = await User.findOne({ ajeerCode: '9090412' }).lean();
+    const cookie = await loginCookie(app, '9090412');
+    await request(app).get('/api/v1/meta').set('Cookie', cookie).expect(200);
+    await User.updateOne({ _id: z!._id }, { $set: { mobileVerified: false } });
+    const res = await request(app).get('/api/v1/meta').set('Cookie', cookie).expect(403);
+    expect(res.body.error.code).toBe('MOBILE_PENDING');
+    await request(app).get('/api/v1/auth/me').set('Cookie', cookie).expect(403);
+    await User.updateOne({ _id: z!._id }, { $set: { mobileVerified: true } });
   });
 
   it('logs in when the mobile matches (any common format) and forces a password change', async () => {
@@ -172,11 +239,29 @@ describe('forgot password → district reset', () => {
   });
 
   it('district resets: password back to 123, change forced, request closed, audited', async () => {
+    // Two devices logged in before the reset (cookie and Bearer).
+    const phone = await loginCookie(app, '9090412');
+    const loginRes = await login({ ajeerCode: '9090412', password: 'demo1234' }).expect(200);
+    const bearer = String(loginRes.headers['set-cookie']).split(';')[0]!.split('=')[1]!;
+    await request(app).get('/api/v1/meta').set('Cookie', phone).expect(200);
+    await request(app).get('/api/v1/meta').set('Authorization', `Bearer ${bearer}`).expect(200);
+
     const district = await loginCookie(app, '9040001');
     await request(app)
       .post(`/api/v1/users/${arifId}/reset-password`)
       .set('Cookie', district)
       .expect(200);
+
+    // Every session issued before the reset is dead — also for /auth/me and change-password,
+    // so an old device cannot set a new password with "123".
+    await request(app).get('/api/v1/meta').set('Cookie', phone).expect(401);
+    await request(app).get('/api/v1/auth/me').set('Cookie', phone).expect(401);
+    await request(app).get('/api/v1/meta').set('Authorization', `Bearer ${bearer}`).expect(401);
+    await request(app)
+      .post('/api/v1/auth/change-password')
+      .set('Cookie', phone)
+      .send({ currentPassword: '123', newPassword: 'taken-over' })
+      .expect(401);
 
     expect(await PasswordResetRequest.countDocuments({ status: 'pending' })).toBe(0);
     expect(await AuditLog.countDocuments({ action: 'PASSWORD_RESET', targetId: arifId })).toBe(1);

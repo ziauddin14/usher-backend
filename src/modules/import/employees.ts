@@ -1,5 +1,6 @@
 // Employee list import (Excel). Real data lives only in backend/private/ (git-ignored).
-// Upsert by Ajeer Code; new units are created on the fly; existing passwords are never touched.
+// Upsert by Ajeer Code; new units are created on the fly; existing passwords are never touched,
+// and a mobile already on record is never replaced (differences go to the report, CTO 5 Nov 2026).
 import bcrypt from 'bcryptjs';
 import { connectDb } from '../../lib/db.js';
 import { DistrictNames } from '../../lib/district-names.js';
@@ -121,6 +122,8 @@ export interface ImportResult {
   sameCode: SameCodeGroup[];
   /** Rows whose code ends in something other than "/1" — listed for the CTO. */
   otherSuffix: SameCodeGroup['rows'];
+  /** Existing users whose file mobile differs from the one on record — the record is kept. */
+  mobileConflicts: { row: number; ajeerCode: string; onRecord: string; inFile: string }[];
 }
 
 const clean = (s: string | undefined) => s?.replace(/\s+/g, ' ').trim() || undefined;
@@ -345,7 +348,7 @@ export async function importEmployees(
   const existing = new Map(
     (
       await User.find({ ajeerCode: { $in: plan.valid.map((r) => r.ajeerCode) } })
-        .select('ajeerCode isDemo')
+        .select('ajeerCode isDemo mobile')
         .lean()
     ).map((u) => [u.ajeerCode, u]),
   );
@@ -367,6 +370,21 @@ export async function importEmployees(
   const units = new UnitResolver(names);
   await units.load();
   const assignments = toImport.map((row) => ({ row, unit: units.unitFor(row) }));
+  // A number already on record (from an earlier import, the KPI file or typed by the user) is
+  // never overwritten; only users without one get the file's number.
+  const mobileConflicts: ImportResult['mobileConflicts'] = [];
+  for (const { row } of assignments) {
+    const onRecord = existing.get(row.ajeerCode)?.mobile;
+    if (onRecord && row.mobile && onRecord !== row.mobile) {
+      mobileConflicts.push({
+        row: row.row,
+        ajeerCode: row.ajeerCode,
+        onRecord,
+        inFile: row.mobile,
+      });
+    }
+  }
+  const fillsMobile = (row: ValidRow) => !!row.mobile && !existing.get(row.ajeerCode)?.mobile;
 
   const result: ImportResult = {
     dryRun,
@@ -378,6 +396,7 @@ export async function importEmployees(
     warnings: plan.warnings,
     sameCode: plan.sameCode,
     otherSuffix: plan.otherSuffix,
+    mobileConflicts,
   };
   if (dryRun) return result;
 
@@ -407,7 +426,7 @@ export async function importEmployees(
               ajeerCodeFull: row.ajeerCodeFull,
               ...(row.nameUr ? { nameUr: row.nameUr } : {}),
               ...(row.fatherName ? { fatherName: row.fatherName } : {}),
-              ...(row.mobile ? { mobile: row.mobile, mobileVerified: true } : {}),
+              ...(fillsMobile(row) ? { mobile: row.mobile, mobileVerified: true } : {}),
               role: row.role,
               ...(row.zimmedari ? { zimmedari: row.zimmedari } : {}),
               unitCode: unit.code,
@@ -475,6 +494,11 @@ export async function writeEmployeeReport(result: ImportResult, file: string): P
       r.district,
       r.imported ? 'haan' : 'nahi',
     ]),
+  );
+  sheet(
+    'Mobile farq',
+    ['Row', 'Ajeer code', 'Record wala number (rakha gaya)', 'File wala number'],
+    result.mobileConflicts.map((c) => [c.row, c.ajeerCode, c.onRecord, c.inFile]),
   );
   sheet(
     'Naye units',

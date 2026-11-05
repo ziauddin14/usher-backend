@@ -23,7 +23,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  await useLiveDb();
+  await useLiveDb({ dryRun });
   const path = resolve(file);
   const rows = await readEmployeeSheet(path);
   const result = await importEmployees(rows, { dryRun });
@@ -47,6 +47,9 @@ async function main(): Promise<void> {
     `  same code twice: ${result.sameCode.length} (e.g. /1 and /2 — sheet "Aik code - 1 aur 2")`,
   );
   console.warn(`  code not /1   : ${result.otherSuffix.length} (sheet "Code 2, 3")`);
+  console.warn(
+    `  mobile kept   : ${result.mobileConflicts.length} (different number in the file — sheet "Mobile farq")`,
+  );
   console.warn(`  rows rejected : ${result.errors.length}`);
   for (const e of result.errors.slice(0, 50)) {
     console.warn(`      row ${e.row}${e.ajeerCode ? ` [${e.ajeerCode}]` : ''}: ${e.message}`);

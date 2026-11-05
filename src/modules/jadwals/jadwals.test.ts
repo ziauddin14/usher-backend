@@ -103,6 +103,29 @@ describe('starting a day', () => {
       .expect(400);
   });
 
+  it('back-dated day next to today: listed on /today as an open draft, audited as back-dated', async () => {
+    await startBikeDay(arif, 100); // today
+    const back = await startBikeDay(arif, 50, addDays(today, -2));
+    // The same earlier date twice → 409.
+    await api(arif)
+      .post('/jadwals', { entryType: 'rukhsat', date: addDays(today, -2) })
+      .expect(409);
+
+    const t = await api(arif).get('/jadwals/today').expect(200);
+    expect(t.body.jadwal.date).toBe(today);
+    expect(t.body.otherDrafts).toEqual([{ id: back, date: addDays(today, -2), villages: 0 }]);
+    // Another zimmedar never sees them.
+    expect((await api(other).get('/jadwals/today').expect(200)).body.otherDrafts).toEqual([]);
+
+    await api(arif).post(`/jadwals/${back}/visits`, { villageId: villageIds[0] }).expect(201);
+    const done = await api(arif).post(`/jadwals/${back}/submit`, { meterEnd: 80 }).expect(200);
+    expect(done.body.jadwal).toMatchObject({ date: addDays(today, -2), status: 'submitted' });
+    expect(
+      await AuditLog.findOne({ action: 'JADWAL_SUBMIT', targetId: back }).lean(),
+    ).toMatchObject({ details: { date: addDays(today, -2), backdated: true } });
+    expect((await api(arif).get('/jadwals/today').expect(200)).body.otherDrafts).toEqual([]);
+  });
+
   it('non-amli types are created already submitted, with zero totals', async () => {
     const res = await api(arif)
       .post('/jadwals', { entryType: 'qafila', note: 'قافلہ' })

@@ -20,15 +20,19 @@ export interface AuthUser {
   unitCode: string;
   unitPath: string;
   mustChangePassword: boolean;
+  /** users.sessionVersion when the session was checked (see signSession). */
+  sessionVersion?: number;
 }
 
 interface TokenPayload {
   sub: string;
   role: Role;
+  /** users.sessionVersion at login; a reset bumps it and so ends every older session. */
+  sv?: number;
 }
 
-export function signSession(user: { id: string; role: Role }): string {
-  const payload: TokenPayload = { sub: user.id, role: user.role };
+export function signSession(user: { id: string; role: Role; sessionVersion?: number }): string {
+  const payload: TokenPayload = { sub: user.id, role: user.role, sv: user.sessionVersion ?? 0 };
   return jwt.sign(payload, env().JWT_SECRET, {
     algorithm: 'HS256',
     expiresIn: `${SESSION_HOURS}h`,
@@ -76,6 +80,8 @@ function verify(token: string): TokenPayload | null {
  * 401 unless a valid session belongs to an active user; sets `req.user`.
  * While a password change is pending (first login / after a reset) every other endpoint
  * answers 403 PASSWORD_CHANGE_REQUIRED — only `requireSession` routes stay open.
+ * A session from before a password reset (older sessionVersion) answers 401; a user whose
+ * self-entered mobile still waits for the District answers 403 MOBILE_PENDING everywhere.
  */
 export const requireAuth: RequestHandler = async (req, _res, next) => {
   await loadSessionUser(req);
@@ -99,10 +105,15 @@ async function loadSessionUser(req: Request): Promise<void> {
   }
   await connectDb();
   const user = await User.findById(payload.sub)
-    .select('ajeerCode name nameUr role zimmedari unitCode unitPath isActive mustChangePassword')
+    .select(
+      'ajeerCode name nameUr role zimmedari unitCode unitPath isActive mustChangePassword mobileVerified sessionVersion',
+    )
     .lean();
-  if (!user?.isActive) {
+  if (!user?.isActive || (payload.sv ?? 0) !== (user.sessionVersion ?? 0)) {
     throw new AppError(401, 'UNAUTHENTICATED', 'Login required');
+  }
+  if (user.mobileVerified === false) {
+    throw new AppError(403, 'MOBILE_PENDING', 'Mobile number waits for District confirmation');
   }
   req.user = {
     id: String(user._id),
@@ -114,6 +125,7 @@ async function loadSessionUser(req: Request): Promise<void> {
     unitCode: user.unitCode,
     unitPath: user.unitPath,
     mustChangePassword: user.mustChangePassword,
+    sessionVersion: user.sessionVersion ?? 0,
   };
 }
 

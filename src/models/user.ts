@@ -36,6 +36,11 @@ const userSchema = new Schema(
     mustChangePassword: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
     lastLoginAt: { type: Date },
+    /**
+     * Bumped on a supervisor password reset (and a rejected mobile): every session token signed with
+     * an older version stops working, so all logged-in devices must log in again.
+     */
+    sessionVersion: { type: Number, default: 0 },
     isDemo: { type: Boolean, default: false },
   },
   { timestamps: true },
