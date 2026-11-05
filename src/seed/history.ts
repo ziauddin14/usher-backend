@@ -1,5 +1,6 @@
-// Invented jadwal history (data model "Seed" → Jadwals): 1 Dec 2025 → yesterday (Karachi) for
-// every seeded zimmedar, i.e. the whole previous reward period (H1-2026) and the current one.
+// Invented jadwal history (data model "Seed" → Jadwals): a rolling 12 months up to yesterday
+// (Karachi) for every seeded zimmedar (CTO 5 Nov 2026) — the current month and the 11 before it,
+// which always covers the whole previous reward period and the current one.
 // Totals are computed with computeDayTotals, never typed by hand.
 import { Types } from 'mongoose';
 import { assertDemoDb } from '../lib/databases.js';
@@ -13,7 +14,15 @@ import { computeDayTotals } from '../modules/reports/calc.js';
 import { periodFor } from '../modules/reports/reward.js';
 import { FIRST, LAST, rng } from './data.js';
 
-export const HISTORY_START = '2025-12-01';
+/** Months of invented history: the current month and the 11 before it (CTO 5 Nov 2026). */
+export const HISTORY_MONTHS = 12;
+
+/** First day of the rolling history window for `today`, e.g. 2026-11-05 → 2025-12-01. */
+export function historyStart(today: string): string {
+  const [y, m] = today.split('-').map(Number) as [number, number];
+  const index = y * 12 + (m - 1) - (HISTORY_MONTHS - 1);
+  return `${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, '0')}-01`;
+}
 export const DEMO_ZIMMEDAR = '9090412';
 
 /**
@@ -175,7 +184,8 @@ export async function seedHistory(
   };
   const rules = await getRewardRules();
   const yesterday = addDays(today, -1);
-  if (yesterday < HISTORY_START) return { jadwals: 0 };
+  const start = historyStart(today);
+  if (yesterday < start) return { jadwals: 0 };
 
   const zimmedaran = await User.find({ role: 'zimmedar', isDemo: true })
     .select('_id ajeerCode unitPath')
@@ -239,11 +249,7 @@ export async function seedHistory(
 
     const docs: Record<string, unknown>[] = [];
     const days: { date: string; type: string }[] = [];
-    for (
-      let first = HISTORY_START;
-      first <= yesterday;
-      first = addDays(first, daysInMonth(first))
-    ) {
+    for (let first = start; first <= yesterday; first = addDays(first, daysInMonth(first))) {
       const month = first.slice(0, 7);
       const r = rng(monthSeed(z.ajeerCode, month));
       // The whole month is generated (day types first, so its reward amount can be spread over

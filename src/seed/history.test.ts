@@ -3,7 +3,7 @@ import { Jadwal } from '../models/jadwal.js';
 import { User } from '../models/user.js';
 import { computeDayTotals } from '../modules/reports/calc.js';
 import { DEFAULT_SETTINGS } from '../modules/settings/defaults.js';
-import { DEMO_MONTHLY, seedHistory } from './history.js';
+import { DEMO_MONTHLY, historyStart, seedHistory } from './history.js';
 import { seedDemo } from './seed.js';
 
 const TODAY = '2026-11-01';
@@ -18,7 +18,16 @@ async function monthly(ajeerCode: string): Promise<Record<string, number>> {
   return Object.fromEntries(rows.map((r) => [r._id, r.amount]));
 }
 
-describe('seedHistory (invented jadwal history, Dec 2025 → yesterday)', () => {
+describe('historyStart (rolling 12 months, CTO 5 Nov 2026)', () => {
+  it('is the first day of the month 11 months back', () => {
+    expect(historyStart('2026-11-05')).toBe('2025-12-01');
+    expect(historyStart('2026-12-01')).toBe('2026-01-01');
+    expect(historyStart('2027-01-31')).toBe('2026-02-01');
+    expect(historyStart('2027-05-15')).toBe('2026-06-01');
+  });
+});
+
+describe('seedHistory (invented jadwal history, rolling 12 months → yesterday)', () => {
   beforeAll(async () => {
     await seedDemo({ reset: true });
     const z = await User.findOne({
@@ -112,5 +121,18 @@ describe('seedHistory (invented jadwal history, Dec 2025 → yesterday)', () => 
     expect(
       await Jadwal.countDocuments({ ajeerCode: z!.ajeerCode, month: '2026-09' }),
     ).toBeGreaterThan(15);
+  });
+
+  it('a later run never writes days before its 12-month window', async () => {
+    const z = await User.findOne({ role: 'zimmedar', unitCode: 'DADU' })
+      .sort({ ajeerCode: 1 })
+      .lean();
+    await seedHistory('2027-03-15', { ajeerCodes: [z!.ajeerCode] });
+    const first = await Jadwal.findOne({ ajeerCode: z!.ajeerCode }).sort({ date: 1 }).lean();
+    expect(first!.date >= '2026-04-01').toBe(true);
+    expect(first!.date <= '2026-04-05').toBe(true);
+    expect(
+      await Jadwal.countDocuments({ ajeerCode: z!.ajeerCode, date: { $gte: '2027-03-15' } }),
+    ).toBe(0);
   });
 });
