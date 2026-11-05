@@ -18,6 +18,11 @@ import type { DashPeriod } from './schemas.js';
 
 const LEVEL_ORDER: UnitLevel[] = ['pakistan', 'suba', 'division', 'district'];
 
+/** Submitted today (any entry type). */
+const SUBMITTED = new Set<TodayStatus>(['jama', 'rukhsat', 'course', 'qafila', 'mashwara_full']);
+/** Submitted today as field activity (CTO 5 Nov 2026): everything submitted except rukhsat. */
+const FIELD = new Set<TodayStatus>(['jama', 'course', 'qafila', 'mashwara_full']);
+
 export type TodayStatus =
   'jama' | 'jari' | 'nahi' | 'rukhsat' | 'course' | 'qafila' | 'mashwara_full';
 
@@ -192,8 +197,16 @@ function tilesOf(rows: ZimmedarRow[], rules: RewardRules) {
       jari: rows.filter((r) => r.today === 'jari').length,
       nahi: rows.filter((r) => r.today === 'nahi').length,
       other: rows.filter((r) => !['jama', 'jari', 'nahi'].includes(r.today)).length,
-      /** Zimmedaran with a submitted jadwal of any entry type today. */
-      submitted: rows.filter((r) => r.today !== 'jari' && r.today !== 'nahi').length,
+      /**
+       * Jadwal Submission % numerator: zimmedaran with a submitted jadwal today, any entry type
+       * (rukhsat included — it measures the record, not leave approval).
+       */
+      submitted: rows.filter((r) => SUBMITTED.has(r.today)).length,
+      /**
+       * Field Activity % numerator: submitted amli, qafila, course or full-day mashwara —
+       * never rukhsat (CTO 5 Nov 2026). Drafts ("jari") and no record count in neither.
+       */
+      field: rows.filter((r) => FIELD.has(r.today)).length,
     },
     /** Submitted jadwal days in the period (all zimmedaran together). */
     recordDays: rows.reduce((s, r) => s + r.recordDays, 0),

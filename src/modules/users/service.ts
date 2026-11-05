@@ -120,18 +120,24 @@ export async function resetPassword(caller: AuthUser, userId: string): Promise<v
 }
 
 /**
- * Only a district user verifies self-entered mobiles (CTO 5 Nov 2026): it sees the full number,
- * confirms or rejects. Division, suba and pakistan see the status (masked) read-only.
+ * Self-entered mobiles are verified one level up (CTO 5 Nov 2026): zimmedar ← District,
+ * district ← Division, division ← Suba, suba ← Pakistan. Only that level sees the full number,
+ * confirms or rejects; every other level sees the status (masked) read-only. Nobody verifies
+ * their own or a same-level account. A pakistan-level account has no level above it in the
+ * data model (the "designated central authority" is not defined yet), so nobody can verify it.
  */
-function assertMobileVerifier(caller: AuthUser): void {
-  if (caller.role !== 'district') {
-    throw new AppError(403, 'FORBIDDEN', 'Only the District verifies mobile numbers');
+function assertVerifierOf(caller: AuthUser, target: { role: Role }): void {
+  if (ROLE_RANK[caller.role] !== ROLE_RANK[target.role] + 1) {
+    throw new AppError(
+      403,
+      'FORBIDDEN',
+      'Only the level directly above verifies this mobile number',
+    );
   }
 }
 
-/** The District confirms a number the user typed at the first login. Audit MOBILE_CONFIRM. */
+/** The level directly above confirms a number typed at the first login. Audit MOBILE_CONFIRM. */
 export async function confirmMobile(caller: AuthUser, userId: string): Promise<void> {
-  assertMobileVerifier(caller);
   await connectDb();
   const target = Types.ObjectId.isValid(userId)
     ? await User.findById(userId).select('ajeerCode role unitPath mobile mobileVerified').lean()
@@ -140,6 +146,7 @@ export async function confirmMobile(caller: AuthUser, userId: string): Promise<v
   if (ROLE_RANK[target.role] >= ROLE_RANK[caller.role]) {
     throw new AppError(403, 'FORBIDDEN', 'Only users below your level can be confirmed');
   }
+  assertVerifierOf(caller, target);
   if (!target.mobile) throw new AppError(409, 'CONFLICT', 'This user has no mobile number yet');
   if (target.mobileVerified !== false) {
     throw new AppError(409, 'CONFLICT', 'This mobile number is already confirmed');
@@ -163,11 +170,10 @@ export async function confirmMobile(caller: AuthUser, userId: string): Promise<v
 }
 
 /**
- * The District rejects a number the user typed at the first login: the number is removed (the
+ * The level directly above rejects a number typed at the first login: the number is removed (the
  * user types the right one at the next login) and any session ends. Audit MOBILE_REJECT.
  */
 export async function rejectMobile(caller: AuthUser, userId: string): Promise<void> {
-  assertMobileVerifier(caller);
   await connectDb();
   const target = Types.ObjectId.isValid(userId)
     ? await User.findById(userId).select('ajeerCode role unitPath mobile mobileVerified').lean()
@@ -176,6 +182,7 @@ export async function rejectMobile(caller: AuthUser, userId: string): Promise<vo
   if (ROLE_RANK[target.role] >= ROLE_RANK[caller.role]) {
     throw new AppError(403, 'FORBIDDEN', 'Only users below your level can be rejected');
   }
+  assertVerifierOf(caller, target);
   if (!target.mobile || target.mobileVerified !== false) {
     throw new AppError(409, 'CONFLICT', 'This user has no mobile number waiting for confirmation');
   }
@@ -198,12 +205,11 @@ export async function rejectMobile(caller: AuthUser, userId: string): Promise<vo
 }
 
 /**
- * The full self-entered number, for the District that has to check it with the employee before
- * confirming (CTO 5 Nov 2026). Only a district user, only for a lower-level user in its scope whose
+ * The full self-entered number, for the level directly above (see assertVerifierOf), which has to
+ * check it with the employee before confirming (CTO 5 Nov 2026). Only for a user in its scope whose
  * number is still pending. Audit MOBILE_VIEW (who, when — the log keeps the number masked).
  */
 export async function viewPendingMobile(caller: AuthUser, userId: string): Promise<string> {
-  assertMobileVerifier(caller);
   await connectDb();
   const target = Types.ObjectId.isValid(userId)
     ? await User.findById(userId).select('ajeerCode role unitPath mobile mobileVerified').lean()
@@ -212,6 +218,7 @@ export async function viewPendingMobile(caller: AuthUser, userId: string): Promi
   if (ROLE_RANK[target.role] >= ROLE_RANK[caller.role]) {
     throw new AppError(403, 'FORBIDDEN', 'Only users below your level');
   }
+  assertVerifierOf(caller, target);
   if (!target.mobile || target.mobileVerified !== false) {
     throw new AppError(409, 'CONFLICT', 'This user has no mobile number waiting for confirmation');
   }

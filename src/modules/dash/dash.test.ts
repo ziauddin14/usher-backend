@@ -112,11 +112,11 @@ describe('dashboards (B1 / B2)', () => {
     expect(o.tiles.recordDays).toBe(t.rows.reduce((s, r) => s + r.recordDays, 0));
   });
 
-  it("today's status: Jama / Jari hai / leave type / Nahi aaya", async () => {
+  it("today's status and the two measures: submission (rukhsat too) vs field activity", async () => {
     const ghotki = await User.find({ role: 'zimmedar', unitCode: 'GHOTKI' })
       .sort({ ajeerCode: 1 })
       .lean();
-    const [a, b, c] = ghotki;
+    const [a, b, c, d, e, f] = ghotki;
     const base = (u: (typeof ghotki)[number]) => ({
       userId: u._id,
       ajeerCode: u.ajeerCode,
@@ -130,6 +130,9 @@ describe('dashboards (B1 / B2)', () => {
       { ...base(a!), entryType: 'amli', status: 'submitted', submittedAt: new Date() },
       { ...base(b!), entryType: 'amli', status: 'draft' },
       { ...base(c!), entryType: 'rukhsat', status: 'submitted', submittedAt: new Date() },
+      { ...base(d!), entryType: 'qafila', status: 'submitted', submittedAt: new Date() },
+      { ...base(e!), entryType: 'course', status: 'submitted', submittedAt: new Date() },
+      { ...base(f!), entryType: 'mashwara_full', status: 'submitted', submittedAt: new Date() },
     ]);
     const rows = (await get('/dash/units/GHOTKI/zimmedaran', district).expect(200)).body
       .rows as Row[];
@@ -137,7 +140,21 @@ describe('dashboards (B1 / B2)', () => {
     expect(by.get(a!.ajeerCode)).toBe('jama');
     expect(by.get(b!.ajeerCode)).toBe('jari');
     expect(by.get(c!.ajeerCode)).toBe('rukhsat');
-    expect(rows.filter((r) => r.today === 'nahi')).toHaveLength(7);
+    expect(rows.filter((r) => r.today === 'nahi')).toHaveLength(4);
+    // Submission % numerator: a (amli), c (rukhsat), d, e, f = 5 · Field Activity: a, d, e, f = 4.
+    // b is a draft (neither); denominator = 10 active zimmedaran.
+    const o = (await get('/dash/units/GHOTKI/overview', district).expect(200)).body as {
+      tiles: { zimmedaran: number; today: { submitted: number; field: number; jari: number } };
+    };
+    expect(o.tiles.zimmedaran).toBe(10);
+    expect(o.tiles.today).toMatchObject({ submitted: 5, field: 4, jari: 1 });
+    const kids = (await get('/dash/units/SUKKUR/children', division).expect(200)).body as {
+      rows: { unit: { code: string }; today: { submitted: number; field: number } }[];
+    };
+    expect(kids.rows.find((r) => r.unit.code === 'GHOTKI')!.today).toMatchObject({
+      submitted: 5,
+      field: 4,
+    });
   });
 
   it('B2: division children are its districts; pakistan children are the subas', async () => {

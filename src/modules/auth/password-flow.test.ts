@@ -272,6 +272,97 @@ describe('first login with the initial password 123', () => {
   });
 });
 
+describe('mobile verification one level up (CTO 5 Nov 2026)', () => {
+  // New supervisor accounts without a mobile, one per level, inside the demo hierarchy.
+  const ACCOUNTS = [
+    {
+      ajeerCode: '9040099',
+      role: 'district',
+      unitCode: 'GHOTKI',
+      unitPath: 'PK/INT_SINDH/SUKKUR/GHOTKI',
+    },
+    { ajeerCode: '9030099', role: 'division', unitCode: 'SUKKUR', unitPath: 'PK/INT_SINDH/SUKKUR' },
+    { ajeerCode: '9020099', role: 'suba', unitCode: 'INT_SINDH', unitPath: 'PK/INT_SINDH' },
+    { ajeerCode: '9010099', role: 'pakistan', unitCode: 'PK', unitPath: 'PK' },
+  ] as const;
+  const ids: Record<string, string> = {};
+  let cookies: Record<string, string> = {};
+  const act = (code: string, id: string, action: string) =>
+    request(app).post(`/api/v1/users/${id}/${action}`).set('Cookie', cookies[code]!);
+
+  beforeAll(async () => {
+    await seedDemo({ reset: true });
+    const passwordHash = await bcrypt.hash('123', 4);
+    for (const a of ACCOUNTS) {
+      const u = await User.create({
+        ...a,
+        name: `Test ${a.role}`,
+        passwordHash,
+        mustChangePassword: true,
+      });
+      ids[a.ajeerCode] = String(u._id);
+      // First login with a self-entered number → pending, no session.
+      const res = await login({ ajeerCode: a.ajeerCode, password: '123', mobile: '03031112233' });
+      expect(res.body.error.code).toBe('MOBILE_PENDING');
+    }
+    cookies = {
+      '9040001': await loginCookie(app, '9040001'),
+      '9030001': await loginCookie(app, '9030001'),
+      '9020001': await loginCookie(app, '9020001'),
+      '9010001': await loginCookie(app, '9010001'),
+    };
+  });
+
+  it('a district account: not by another district or the suba — by its division', async () => {
+    const id = ids['9040099']!;
+    await act('9040001', id, 'confirm-mobile').expect(403); // same level
+    await act('9020001', id, 'confirm-mobile').expect(403); // two levels up
+    await request(app)
+      .get(`/api/v1/users/${id}/pending-mobile`)
+      .set('Cookie', cookies['9030001']!)
+      .expect(200);
+    await act('9030001', id, 'confirm-mobile').expect(200);
+    const ok = await login({ ajeerCode: '9040099', password: '123', mobile: '03031112233' }).expect(
+      200,
+    );
+    expect(ok.body.user.mustChangePassword).toBe(true);
+  });
+
+  it('a division account by its suba; a suba account by pakistan', async () => {
+    await act('9030001', ids['9030099']!, 'confirm-mobile').expect(403);
+    await act('9020001', ids['9030099']!, 'confirm-mobile').expect(200);
+    await act('9020001', ids['9020099']!, 'reject-mobile').expect(403);
+    await act('9010001', ids['9020099']!, 'reject-mobile').expect(200);
+    const confirms = await AuditLog.find({
+      action: { $in: ['MOBILE_CONFIRM', 'MOBILE_REJECT'] },
+    }).lean();
+    expect(
+      confirms.map((a) => [
+        a.action,
+        a.actorAjeerCode,
+        (a.details as { targetAjeerCode: string }).targetAjeerCode,
+      ]),
+    ).toEqual(
+      expect.arrayContaining([
+        ['MOBILE_CONFIRM', '9030001', '9040099'],
+        ['MOBILE_CONFIRM', '9020001', '9030099'],
+        ['MOBILE_REJECT', '9010001', '9020099'],
+      ]),
+    );
+  });
+
+  it('a pakistan account has no verifier yet (no self- or same-level verification)', async () => {
+    const id = ids['9010099']!;
+    await act('9010001', id, 'confirm-mobile').expect(403);
+    await request(app)
+      .get(`/api/v1/users/${id}/pending-mobile`)
+      .set('Cookie', cookies['9010001']!)
+      .expect(403);
+    const still = await login({ ajeerCode: '9010099', password: '123', mobile: '03031112233' });
+    expect(still.body.error.code).toBe('MOBILE_PENDING');
+  });
+});
+
 describe('forgot password → district reset', () => {
   let arifId: string;
   let larkanaUserId: string;
