@@ -1,4 +1,6 @@
 // Special reward (scope §4) — pure functions, no database access.
+// Average = period total ÷ divisor (always 6; CTO 5 Nov 2026), current month included, future
+// months never estimated. A tier is reached only when total ≥ minAvg × divisor exactly.
 
 export interface RewardPeriodRule {
   id: string;
@@ -36,11 +38,13 @@ export interface TierStatus {
   minAvg: number;
   /** minAvg × divisor — the period total needed for this tier. */
   target: number;
+  /** target − total, never below 0 (integer rupees). */
   needed: number;
   /** needed spread evenly over the months still to come (ceil). */
   perMonthNeeded: number;
+  /** Exact comparison: total ≥ target (no rounding up). */
   achieved: boolean;
-  /** runningAvg ÷ minAvg, capped at 1 (the bar on A12). */
+  /** total ÷ target, capped at 1 (the bar on A12). */
   progress: number;
 }
 
@@ -51,16 +55,17 @@ export interface RewardStatus {
   total: number;
   /** Months of the period up to and including the current one. */
   monthsPassed: number;
-  /** total ÷ monthsPassed — the big number on A12 ("اب تک ماہانہ اوسط"). */
+  /** total ÷ divisor rounded down to whole rupees — the big number on A12 ("ماہانہ اوسط"). */
   runningAvg: number;
-  /** total ÷ divisor — what the reward decision would be if nothing more came in. */
-  finalAvgIfNoMore: number;
   /**
    * Months in which the still-needed amount can come: the months after the current one; in the
    * last month of the period, the current month itself.
    */
   remainingMonths: string[];
+  /** Lowest tier first. */
   tiers: TierStatus[];
+  /** Reward amount of the highest tier already reached (0 = none yet). */
+  earned: number;
 }
 
 const ym = (year: number, month: number) => `${year}-${String(month).padStart(2, '0')}`;
@@ -96,6 +101,13 @@ export function previousPeriod(period: RewardPeriod, rules: Pick<RewardRules, 'p
   return periodFor(m === 1 ? ym(y - 1, 12) : ym(y, m - 1), rules);
 }
 
+/** The highest tier whose exact target (minAvg × divisor) the total has reached. */
+function highestTier(total: number, rules: RewardRules): RewardTierRule | undefined {
+  return [...rules.tiers]
+    .sort((a, b) => b.minAvg - a.minAvg)
+    .find((t) => total >= t.minAvg * rules.divisor);
+}
+
 /**
  * Reward status for the period containing `today`. `monthly` = reward-eligible wusooli per month
  * (submitted jadwals only); a month without records counts as 0.
@@ -108,15 +120,13 @@ export function rewardStatus(
   const period = periodFor(today, rules);
   const current = today.slice(0, 7);
   const byMonth = new Map(monthly.map((m) => [m.month, m.amount]));
-  const months = period.months.map((month) => ({
-    month,
-    amount: month > current ? 0 : (byMonth.get(month) ?? 0),
-    state: (month < current ? 'past' : month === current ? 'current' : 'future') as
-      'past' | 'current' | 'future',
-  }));
+  const months = period.months.map((month) => {
+    const state: 'past' | 'current' | 'future' =
+      month < current ? 'past' : month === current ? 'current' : 'future';
+    return { month, amount: state === 'future' ? 0 : (byMonth.get(month) ?? 0), state };
+  });
   const total = months.reduce((sum, m) => sum + m.amount, 0);
   const monthsPassed = months.filter((m) => m.state !== 'future').length;
-  const runningAvg = monthsPassed > 0 ? Math.round(total / monthsPassed) : 0;
   const future = months.filter((m) => m.state === 'future').map((m) => m.month);
   const remainingMonths = future.length > 0 ? future : [current];
 
@@ -131,8 +141,8 @@ export function rewardStatus(
         target,
         needed,
         perMonthNeeded: Math.ceil(needed / remainingMonths.length),
-        achieved: needed === 0,
-        progress: Math.min(1, t.minAvg > 0 ? runningAvg / t.minAvg : 0),
+        achieved: total >= target,
+        progress: target > 0 ? Math.min(1, total / target) : 0,
       };
     });
 
@@ -142,25 +152,23 @@ export function rewardStatus(
     months,
     total,
     monthsPassed,
-    runningAvg,
-    finalAvgIfNoMore: Math.round(total / rules.divisor),
+    runningAvg: Math.floor(total / rules.divisor),
     remainingMonths,
     tiers,
+    earned: highestTier(total, rules)?.amount ?? 0,
   };
 }
 
-/** Result of a finished period: average = total ÷ divisor; the highest tier reached. */
+/** Result of a finished period: average = total ÷ divisor (rounded down); exact tier check. */
 export function periodResult(monthly: MonthAmount[], rules: RewardRules, period: RewardPeriod) {
   const inPeriod = new Set(period.months);
   const total = monthly.filter((m) => inPeriod.has(m.month)).reduce((s, m) => s + m.amount, 0);
-  const avg = Math.round(total / rules.divisor);
-  const tier = [...rules.tiers].sort((a, b) => b.minAvg - a.minAvg).find((t) => avg >= t.minAvg);
   return {
     periodId: period.id,
     periodKey: period.key,
     months: period.months,
     total,
-    avg,
-    amount: tier?.amount ?? 0,
+    avg: Math.floor(total / rules.divisor),
+    amount: highestTier(total, rules)?.amount ?? 0,
   };
 }

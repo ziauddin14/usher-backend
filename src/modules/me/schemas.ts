@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { isDateString } from '../../lib/time.js';
 
-export const PERIODS = ['day', 'week', 'month'] as const;
+export const PERIODS = ['day', 'week', 'month', 'reward'] as const;
 export type SummaryPeriod = (typeof PERIODS)[number];
 
 export const summaryQuery = z.object({

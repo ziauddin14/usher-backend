@@ -1,25 +1,40 @@
-// Invented jadwal history (data model "Seed" → Jadwals): 1 Jun 2026 → yesterday (Karachi) for
-// every seeded zimmedar. Totals are computed with computeDayTotals, never typed by hand.
+// Invented jadwal history (data model "Seed" → Jadwals): 1 Dec 2025 → yesterday (Karachi) for
+// every seeded zimmedar, i.e. the whole previous reward period (H1-2026) and the current one.
+// Totals are computed with computeDayTotals, never typed by hand.
 import { Types } from 'mongoose';
-import { getSettings } from '../lib/settings.js';
+import { getRewardRules, getSettings } from '../lib/settings.js';
 import { addDays, karachiDate } from '../lib/time.js';
 import { Jadwal } from '../models/jadwal.js';
 import { User } from '../models/user.js';
 import { Village } from '../models/village.js';
 import { computeDayTotals } from '../modules/reports/calc.js';
+import { periodFor } from '../modules/reports/reward.js';
 import { FIRST, LAST, rng } from './data.js';
 
-export const HISTORY_START = '2026-06-01';
+export const HISTORY_START = '2025-12-01';
 export const DEMO_ZIMMEDAR = '9090412';
 
-/** The demo zimmedar's reward-eligible wusooli per month, exactly as in design A12 / scope §4. */
-export const DEMO_MONTHLY: Record<string, number> = {
+/**
+ * The demo zimmedar's reward-eligible wusooli per month. H1-2026 (Dec–May) totals 1,284,000 →
+ * average 214,000 → Rs 5,000 earned, as on the design's previous-period line (CTO 5 Nov 2026).
+ */
+export const DEMO_MONTHLY_H1: Record<string, number> = {
+  '2025-12': 205_000,
+  '2026-01': 198_000,
+  '2026-02': 220_000,
+  '2026-03': 231_000,
+  '2026-04': 214_000,
+  '2026-05': 216_000,
+};
+/** Jun–Oct 2026 exactly as in design A12 / scope §4. November is kept small. */
+export const DEMO_MONTHLY_H2: Record<string, number> = {
   '2026-06': 185_000,
   '2026-07': 210_000,
   '2026-08': 160_000,
   '2026-09': 245_000,
   '2026-10': 198_000,
 };
+export const DEMO_MONTHLY: Record<string, number> = { ...DEMO_MONTHLY_H1, ...DEMO_MONTHLY_H2 };
 
 /** Monthly reward-wusooli bands so every district has people in every reward status. */
 const PROFILES = [
@@ -131,9 +146,16 @@ export interface HistoryResult {
   jadwals: number;
 }
 
+/** Seed for one zimmedar's month: every month has its own random stream, so adding earlier
+ * months or re-running later never changes the days generated for another month. */
+const monthSeed = (ajeerCode: string, month: string) =>
+  Number(ajeerCode) * 31 + Number(month.slice(0, 4)) * 12 + Number(month.slice(5, 7));
+
 /**
- * Seed the history for every demo zimmedar who has none yet (idempotent: days that already
- * exist are kept). Never writes today — the demo starts with "شروع نہیں ہوا".
+ * Seed the history for every demo zimmedar (idempotent). Days that already exist are kept, and a
+ * month that already has records only gets days after its last record (so "no record" days stay
+ * empty and finished months keep their exact figures). Never writes today — the demo starts
+ * with "شروع نہیں ہوا".
  */
 export async function seedHistory(
   today = karachiDate(),
@@ -148,6 +170,7 @@ export async function seedHistory(
     included: categories.filter((c) => c.rewardIncluded && c.id !== 'gsb').map((c) => c.id),
     excluded: categories.filter((c) => !c.rewardIncluded).map((c) => c.id),
   };
+  const rules = await getRewardRules();
   const yesterday = addDays(today, -1);
   if (yesterday < HISTORY_START) return { jadwals: 0 };
 
@@ -167,9 +190,15 @@ export async function seedHistory(
   let inserted = 0;
   for (const z of zimmedaran) {
     if (ajeerCodes && !ajeerCodes.includes(z.ajeerCode)) continue;
-    const existing = new Set(
-      (await Jadwal.find({ userId: z._id }).select('date').lean()).map((j) => j.date),
+    const existingDates = (await Jadwal.find({ userId: z._id }).select('date').lean()).map(
+      (j) => j.date,
     );
+    const existing = new Set(existingDates);
+    const lastInMonth = new Map<string, string>();
+    for (const d of existingDates) {
+      const m = d.slice(0, 7);
+      if (d > (lastInMonth.get(m) ?? '')) lastInMonth.set(m, d);
+    }
     const own = await Village.find({ assignedTo: z._id, status: 'approved' })
       .select('_id name')
       .sort({ nameKey: 1 })
@@ -182,46 +211,73 @@ export async function seedHistory(
             .lean();
     if (villages.length === 0) continue;
 
-    const r = rng(Number(z.ajeerCode));
     const isDemo = z.ajeerCode === DEMO_ZIMMEDAR;
-    const profile = PROFILES[(indexInDistrict.get(z.ajeerCode) ?? 0) % PROFILES.length]!;
-    const base = between(r, profile.min, profile.max);
-    let meter = between(r, 20_000, 60_000);
-
-    // Day types first, so a month's reward amount can be spread over its amli days.
-    const days: { date: string; type: string }[] = [];
-    for (let d = HISTORY_START; d <= yesterday; d = addDays(d, 1)) {
-      const x = r();
-      const type =
-        x < 0.7
-          ? 'amli'
-          : x < 0.78
-            ? 'rukhsat'
-            : x < 0.82
-              ? 'qafila'
-              : x < 0.84
-                ? 'course'
-                : x < 0.86
-                  ? 'mashwara_full'
-                  : 'none'; // no record that day
-      days.push({ date: d, type });
-    }
+    const index = indexInDistrict.get(z.ajeerCode) ?? 0;
+    // Each reward period gets its own band (shifted by one in H1), so the previous period shows
+    // different outcomes from the current one.
+    const bands = new Map<string, { profile: (typeof PROFILES)[number]; base: number }>();
+    const bandFor = (month: string) => {
+      const period = periodFor(month, rules);
+      let band = bands.get(period.key);
+      if (!band) {
+        const shift = period.id === 'H1' ? 1 : 0;
+        const profile = PROFILES[(index + shift) % PROFILES.length]!;
+        const base = between(
+          rng(monthSeed(z.ajeerCode, period.months[0]!)),
+          profile.min,
+          profile.max,
+        );
+        band = { profile, base };
+        bands.set(period.key, band);
+      }
+      return band;
+    };
+    let meter = between(rng(Number(z.ajeerCode)), 20_000, 60_000);
 
     const docs: Record<string, unknown>[] = [];
-    const months = [...new Set(days.map((d) => d.date.slice(0, 7)))];
-    for (const month of months) {
-      const amliDays = days.filter((d) => d.date.startsWith(month) && d.type === 'amli');
-      const elapsed = days.filter((d) => d.date.startsWith(month)).length;
+    const days: { date: string; type: string }[] = [];
+    for (
+      let first = HISTORY_START;
+      first <= yesterday;
+      first = addDays(first, daysInMonth(first))
+    ) {
+      const month = first.slice(0, 7);
+      const r = rng(monthSeed(z.ajeerCode, month));
+      // The whole month is generated (day types first, so its reward amount can be spread over
+      // its amli days) and only the days up to yesterday are stored: a later run adds exactly the
+      // days a full run would have had, so a month never changes once seeded.
+      const monthDays: { date: string; type: string }[] = [];
+      for (let d = first; d.startsWith(month); d = addDays(d, 1)) {
+        const x = r();
+        const type =
+          x < 0.7
+            ? 'amli'
+            : x < 0.78
+              ? 'rukhsat'
+              : x < 0.82
+                ? 'qafila'
+                : x < 0.84
+                  ? 'course'
+                  : x < 0.86
+                    ? 'mashwara_full'
+                    : 'none'; // no record that day
+        monthDays.push({ date: d, type });
+      }
+      // The demo zimmedar's exact months need at least one amli day to carry the amount.
+      if (isDemo && DEMO_MONTHLY[month] && !monthDays.some((d) => d.type === 'amli')) {
+        monthDays[0]!.type = 'amli';
+      }
+      days.push(...monthDays);
+
+      const amliDays = monthDays.filter((d) => d.type === 'amli');
       let monthReward: number;
       if (isDemo) {
         // Exact design numbers; later months stay small (data model "Seed").
         monthReward = DEMO_MONTHLY[month] ?? amliDays.length * 4_000;
       } else {
+        const { profile, base } = bandFor(month);
         const variation = profile.min >= 172_000 && profile.max < 200_000 ? 0.04 : 0.1;
-        monthReward = roundTo(
-          base * (1 - variation + r() * 2 * variation) * (elapsed / daysInMonth(month)),
-          500,
-        );
+        monthReward = roundTo(base * (1 - variation + r() * 2 * variation), 500);
       }
       const perDay = split(r, monthReward, amliDays.length, 500);
 
@@ -261,7 +317,14 @@ export async function seedHistory(
     }
 
     const toInsert = docs
-      .filter((doc) => !existing.has(doc.date as string))
+      .filter((doc) => {
+        const date = doc.date as string;
+        return (
+          date <= yesterday &&
+          !existing.has(date) &&
+          date > (lastInMonth.get(date.slice(0, 7)) ?? '')
+        );
+      })
       .map((doc) => ({
         ...doc,
         userId: z._id,

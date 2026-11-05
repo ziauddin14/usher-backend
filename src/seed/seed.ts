@@ -1,6 +1,8 @@
 import type { Types } from 'mongoose';
 import bcrypt from 'bcryptjs';
+import { assertDemoDb } from '../lib/databases.js';
 import { connectDb } from '../lib/db.js';
+import { env } from '../lib/env.js';
 import { clearSettingsCache, ensureSettings } from '../lib/settings.js';
 import { villageNameKey } from '../lib/text.js';
 import { AuditLog } from '../models/audit-log.js';
@@ -83,11 +85,12 @@ export interface SeedResult {
 
 /**
  * Idempotent demo seed: units, settings, users, villages, and (with `history`) the invented
- * jadwal history 1 Jun 2026 → yesterday. Existing passwords, edited settings and existing days are
+ * jadwal history 1 Dec 2025 → yesterday. Existing passwords, edited settings and existing days are
  * kept; `reset` wipes the demo collections first. Tests that create their own days leave
  * `history` off.
  */
 export async function seedDemo({ reset = false, history = false } = {}): Promise<SeedResult> {
+  assertDemoDb(env().MONGODB_URI); // invented data never goes into ushr_live
   await connectDb();
 
   if (reset) {

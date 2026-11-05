@@ -34,7 +34,7 @@ export function parseCsv(text: string): string[][] {
   let row: string[] = [];
   let field = '';
   let quoted = false;
-  const input = text.replace(/^﻿/, '');
+  const input = text.replace(/^\uFEFF/, ''); // strip a UTF-8 byte-order mark
   for (let i = 0; i < input.length; i += 1) {
     const ch = input[i]!;
     if (quoted) {

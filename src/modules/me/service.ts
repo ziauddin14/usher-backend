@@ -3,9 +3,8 @@
 import { Types } from 'mongoose';
 import type { AuthUser } from '../../lib/auth.js';
 import { connectDb } from '../../lib/db.js';
-import { AppError } from '../../lib/errors.js';
 import { scopeFilter } from '../../lib/scope.js';
-import { getSettings } from '../../lib/settings.js';
+import { getRewardRules, getSettings } from '../../lib/settings.js';
 import { addDays, karachiDate, weekday } from '../../lib/time.js';
 import { Jadwal } from '../../models/jadwal.js';
 import type { DayTotals } from '../reports/calc.js';
@@ -45,19 +44,25 @@ function monthEnd(date: string): string {
 
 /**
  * Date range of a period around `date` (Karachi days), never past today:
- * day = that day · week = the week (settings.weekStartsOn, Monday) · month = the calendar month.
+ * day = that day · week = the week (settings.weekStartsOn, Monday) · month = the calendar month ·
+ * reward = the six-month reward period (settings.reward.periods).
  */
 export function periodRange(
   period: SummaryPeriod,
   date: string,
   today: string,
   weekStartsOn: number,
+  rules: Pick<RewardRules, 'periods'>,
 ): { from: string; to: string } {
   const clamp = (d: string) => (d > today ? today : d);
   if (period === 'day') return { from: date, to: date };
   if (period === 'week') {
     const from = addDays(date, -((weekday(date) - weekStartsOn + 7) % 7));
     return { from, to: clamp(addDays(from, 6)) };
+  }
+  if (period === 'reward') {
+    const { months } = periodFor(date, rules);
+    return { from: `${months[0]!}-01`, to: clamp(monthEnd(`${months.at(-1)!}-01`)) };
   }
   return { from: `${date.slice(0, 7)}-01`, to: clamp(monthEnd(date)) };
 }
@@ -93,7 +98,13 @@ export async function summary(user: AuthUser, opts: { period: SummaryPeriod; dat
   const settings = await getSettings();
   const today = karachiDate();
   const date = opts.date && opts.date < today ? opts.date : today;
-  const { from, to } = periodRange(opts.period, date, today, settings.weekStartsOn);
+  const { from, to } = periodRange(
+    opts.period,
+    date,
+    today,
+    settings.weekStartsOn,
+    await getRewardRules(),
+  );
 
   const sevenFrom = addDays(date, -6);
   const days = await submittedDays(
@@ -123,20 +134,9 @@ export async function summary(user: AuthUser, opts: { period: SummaryPeriod; dat
   };
 }
 
-/** Plain reward rules from the settings document. */
-async function rewardRules(): Promise<RewardRules> {
-  const r = (await getSettings()).reward;
-  if (!r) throw new AppError(500, 'INTERNAL', 'Reward settings missing');
-  return {
-    periods: r.periods.map((p) => ({ id: p.id, startMonth: p.startMonth, months: p.months })),
-    divisor: r.divisor,
-    tiers: r.tiers.map((t) => ({ minAvg: t.minAvg, amount: t.amount })),
-  };
-}
-
 /** GET /me/reward — current period status + previous period result. */
 export async function reward(user: AuthUser) {
-  const rules = await rewardRules();
+  const rules = await getRewardRules();
   const today = karachiDate();
   const period = periodFor(today, rules);
   const prev = previousPeriod(period, rules);
@@ -161,9 +161,13 @@ export async function reward(user: AuthUser) {
   ]);
   const monthly = rows.map((r) => ({ month: r._id, amount: r.amount }));
   const prevMonths = new Set(prev.months);
+  const status = rewardStatus(monthly, rules, today);
+  /** Submitted days in a month (0 = no record at all that month). */
+  const daysOf = (month: string) => rows.find((r) => r._id === month)?.days ?? 0;
   return {
     today,
-    ...rewardStatus(monthly, rules, today),
+    ...status,
+    months: status.months.map((m) => ({ ...m, recordDays: daysOf(m.month) })),
     previous: {
       ...periodResult(monthly, rules, prev),
       recordDays: rows.filter((r) => prevMonths.has(r._id)).reduce((s, r) => s + r.days, 0),
@@ -176,7 +180,13 @@ export async function exportRows(user: AuthUser, opts: { period: SummaryPeriod; 
   const settings = await getSettings();
   const today = karachiDate();
   const date = opts.date && opts.date < today ? opts.date : today;
-  const { from, to } = periodRange(opts.period, date, today, settings.weekStartsOn);
+  const { from, to } = periodRange(
+    opts.period,
+    date,
+    today,
+    settings.weekStartsOn,
+    await getRewardRules(),
+  );
   const days = await submittedDays(user, from, to);
   const byDate = new Map(days.map((d) => [d.date, d]));
   const rows: { date: string; day: DayRow | null }[] = [];

@@ -31,3 +31,27 @@ export function liveDbUri(env: NodeJS.ProcessEnv): string {
   }
   return uri;
 }
+
+/** Throws when invented demo data would be written into a live database. */
+export function assertDemoDb(uri: string): void {
+  if (isLiveDb(uri)) {
+    throw new Error(`Refusing to seed invented data into the live database "${dbNameOf(uri)}".`);
+  }
+}
+
+/**
+ * Why `pnpm seed` must not run (null = it may). Never on a live database; `--reset` wipes data, so
+ * it always needs SEED_CONFIRM set to the database name (local or Atlas alike).
+ */
+export function seedRefusal(
+  uri: string,
+  reset: boolean,
+  confirm: string | undefined,
+): string | null {
+  const name = dbNameOf(uri);
+  if (isLiveDb(uri)) return `Refusing to seed invented data into the live database "${name}".`;
+  if (reset && confirm !== name) {
+    return `Refusing --reset of "${name}" without SEED_CONFIRM=${name || '<database name>'}.`;
+  }
+  return null;
+}
