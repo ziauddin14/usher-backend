@@ -119,8 +119,19 @@ export async function resetPassword(caller: AuthUser, userId: string): Promise<v
   await resetToInitialPassword(caller, target);
 }
 
-/** District (or above) confirms a number the user typed at the first login. Audit MOBILE_CONFIRM. */
+/**
+ * Only a district user verifies self-entered mobiles (CTO 5 Nov 2026): it sees the full number,
+ * confirms or rejects. Division, suba and pakistan see the status (masked) read-only.
+ */
+function assertMobileVerifier(caller: AuthUser): void {
+  if (caller.role !== 'district') {
+    throw new AppError(403, 'FORBIDDEN', 'Only the District verifies mobile numbers');
+  }
+}
+
+/** The District confirms a number the user typed at the first login. Audit MOBILE_CONFIRM. */
 export async function confirmMobile(caller: AuthUser, userId: string): Promise<void> {
+  assertMobileVerifier(caller);
   await connectDb();
   const target = Types.ObjectId.isValid(userId)
     ? await User.findById(userId).select('ajeerCode role unitPath mobile mobileVerified').lean()
@@ -152,10 +163,11 @@ export async function confirmMobile(caller: AuthUser, userId: string): Promise<v
 }
 
 /**
- * District (or above) rejects a number the user typed at the first login: the number is removed
- * (the user types the right one at the next login) and any session ends. Audit MOBILE_REJECT.
+ * The District rejects a number the user typed at the first login: the number is removed (the
+ * user types the right one at the next login) and any session ends. Audit MOBILE_REJECT.
  */
 export async function rejectMobile(caller: AuthUser, userId: string): Promise<void> {
+  assertMobileVerifier(caller);
   await connectDb();
   const target = Types.ObjectId.isValid(userId)
     ? await User.findById(userId).select('ajeerCode role unitPath mobile mobileVerified').lean()
@@ -191,9 +203,7 @@ export async function rejectMobile(caller: AuthUser, userId: string): Promise<vo
  * number is still pending. Audit MOBILE_VIEW (who, when — the log keeps the number masked).
  */
 export async function viewPendingMobile(caller: AuthUser, userId: string): Promise<string> {
-  if (caller.role !== 'district') {
-    throw new AppError(403, 'FORBIDDEN', 'Only the District sees a full pending number');
-  }
+  assertMobileVerifier(caller);
   await connectDb();
   const target = Types.ObjectId.isValid(userId)
     ? await User.findById(userId).select('ajeerCode role unitPath mobile mobileVerified').lean()

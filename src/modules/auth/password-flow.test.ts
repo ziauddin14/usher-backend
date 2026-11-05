@@ -115,13 +115,22 @@ describe('first login with the initial password 123', () => {
     await login({ ajeerCode: z!.ajeerCode, password: '123', mobile: '03015556677' }).expect(403);
 
     const district = await loginCookie(app, '9040001');
-    const other = await loginCookie(app, '9030001'); // division above: also allowed
+    const division = await loginCookie(app, '9030001'); // read-only for mobiles (CTO 5 Nov)
     // Out of scope → 404: a zimmedar of another district cannot be touched by Ghotki.
     const outside = await User.findOne({ role: 'zimmedar', unitCode: { $ne: 'GHOTKI' } }).lean();
     await request(app)
       .post(`/api/v1/users/${String(outside!._id)}/reject-mobile`)
       .set('Cookie', district)
       .expect(404);
+    // Division and above may not verify or reject (403), even inside their scope.
+    await request(app)
+      .post(`/api/v1/users/${String(z!._id)}/reject-mobile`)
+      .set('Cookie', division)
+      .expect(403);
+    await request(app)
+      .post(`/api/v1/users/${String(z!._id)}/confirm-mobile`)
+      .set('Cookie', division)
+      .expect(403);
     await request(app)
       .post(`/api/v1/users/${String(z!._id)}/reject-mobile`)
       .set('Cookie', district)
@@ -135,8 +144,14 @@ describe('first login with the initial password 123', () => {
     // Nothing left to reject.
     await request(app)
       .post(`/api/v1/users/${String(z!._id)}/reject-mobile`)
-      .set('Cookie', other)
+      .set('Cookie', district)
       .expect(409);
+    // The division still sees the status read-only (masked).
+    const seen = await request(app)
+      .get('/api/v1/users?mobileStatus=unverified')
+      .set('Cookie', division)
+      .expect(200);
+    expect(JSON.stringify(seen.body)).not.toContain('03015556677');
     // The user can now type the right number (again pending).
     const retry = await login({ ajeerCode: z!.ajeerCode, password: '123', mobile: '03017778899' });
     expect(retry.body.error.code).toBe('MOBILE_PENDING');
