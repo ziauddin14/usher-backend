@@ -32,10 +32,17 @@ export function liveDbUri(env: NodeJS.ProcessEnv): string {
   return uri;
 }
 
-/** Throws when invented demo data would be written into a live database. */
+/** Databases that may hold invented data: ushr_demo (+ ushr_demo_e2e …) and test databases. */
+export function isDemoDb(uri: string): boolean {
+  return /^ushr_(demo|test)/.test(dbNameOf(uri)) && !isLiveDb(uri);
+}
+
+/** Throws unless invented demo data may be written into this database (allow-list). */
 export function assertDemoDb(uri: string): void {
-  if (isLiveDb(uri)) {
-    throw new Error(`Refusing to seed invented data into the live database "${dbNameOf(uri)}".`);
+  if (!isDemoDb(uri)) {
+    throw new Error(
+      `Refusing to seed invented data into "${dbNameOf(uri) || '(no database name)'}" — only ushr_demo.`,
+    );
   }
 }
 
@@ -50,6 +57,7 @@ export function seedRefusal(
 ): string | null {
   const name = dbNameOf(uri);
   if (isLiveDb(uri)) return `Refusing to seed invented data into the live database "${name}".`;
+  if (!isDemoDb(uri)) return `Refusing to seed "${name || '(no database name)'}" — only ushr_demo.`;
   if (reset && confirm !== name) {
     return `Refusing --reset of "${name}" without SEED_CONFIRM=${name || '<database name>'}.`;
   }

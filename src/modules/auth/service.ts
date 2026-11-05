@@ -62,7 +62,9 @@ export async function login(
 ) {
   await connectDb();
   const user = await User.findOne({ ajeerCode }).select('+passwordHash').lean();
-  const ok = user ? await bcrypt.compare(password, user.passwordHash) : false;
+  // Compare against a dummy hash for unknown codes too, so the answer time does not tell
+  // which ajeer codes exist.
+  const ok = await bcrypt.compare(password, user?.passwordHash ?? (await dummyHash()));
 
   const failed = async (reason: string) =>
     audit({
@@ -95,8 +97,16 @@ export async function login(
       );
     }
     if (!user.mobile) {
-      // No number on record: keep the one the user typed, "tasdeeq baqi" until the District confirms.
-      await User.updateOne({ _id: user._id }, { $set: { mobile: typed, mobileVerified: false } });
+      // No number on record: keep the one the user typed, "tasdeeq baqi" until the District
+      // confirms. Only into an empty slot — a number saved meanwhile is never replaced.
+      const saved = await User.updateOne(
+        { _id: user._id, mobile: { $exists: false } },
+        { $set: { mobile: typed, mobileVerified: false } },
+      );
+      if (saved.modifiedCount === 0) {
+        await failed('mobile_mismatch');
+        throw new AppError(401, 'MOBILE_MISMATCH', 'Mobile number does not match');
+      }
       await audit({
         action: 'MOBILE_SELF_REGISTER',
         actorId: String(user._id),
@@ -140,6 +150,10 @@ export async function login(
   };
   return authUser;
 }
+
+let dummy: Promise<string> | undefined;
+/** A bcrypt hash of nothing anybody can type, made once per instance. */
+const dummyHash = () => (dummy ??= bcrypt.hash(`no-user-${Math.random()}`, BCRYPT_COST));
 
 const mobilePending = () =>
   new AppError(403, 'MOBILE_PENDING', 'Mobile number waits for District confirmation');

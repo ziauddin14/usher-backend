@@ -3,6 +3,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { loginCookie } from '../../../test/helpers.js';
 import { createApp } from '../../index.js';
+import { User } from '../../models/user.js';
 import { DEMO_MONTHLY_H2, seedHistory } from '../../seed/history.js';
 import { seedDemo } from '../../seed/seed.js';
 
@@ -11,6 +12,7 @@ const TODAY = '2026-11-01';
 let arif: string;
 
 interface Reward {
+  divisor: number;
   periodKey: string;
   months: { month: string; amount: number; state: string; recordDays: number }[];
   total: number;
@@ -80,6 +82,7 @@ describe('zimmedar khulasa, reward and export (A11, A12)', () => {
       runningAvg: 166_333,
       remainingMonths: ['2026-11'],
       earned: 0,
+      divisor: 6,
     });
     expect(r.tiers.map((t) => t.needed)).toEqual([202_000, 802_000]);
     expect(r.months[0]!.recordDays).toBeGreaterThan(0);
@@ -124,6 +127,44 @@ describe('zimmedar khulasa, reward and export (A11, A12)', () => {
     const previous = await summary('period=reward&date=2026-03-10');
     expect(previous).toMatchObject({ from: '2025-12-01', to: '2026-05-31' });
     expect(previous.kpis.rewardWusooli).toBe(1_284_000);
+  });
+
+  it('a zimmedar moved to another district keeps the own history (own userId, not unit path)', async () => {
+    const before = await reward();
+    const arifUser = await User.findOne({ ajeerCode: '9090412' }).lean();
+    await User.updateOne(
+      { _id: arifUser!._id },
+      { $set: { unitCode: 'SUKKUR_DIST', unitPath: 'PK/INT_SINDH/SUKKUR/SUKKUR_DIST' } },
+    );
+    try {
+      const moved = await reward();
+      expect(moved.total).toBe(before.total);
+      expect(moved.previous.total).toBe(before.previous.total);
+      expect((await summary('period=month&date=2026-10-15')).kpis.rewardWusooli).toBe(198_000);
+    } finally {
+      await User.updateOne(
+        { _id: arifUser!._id },
+        { $set: { unitCode: arifUser!.unitCode, unitPath: arifUser!.unitPath } },
+      );
+    }
+  });
+
+  it('Excel for a period without any jadwal: "no record" rows and no zero totals', async () => {
+    const res = await get(`/me/export.xlsx?period=day&date=${TODAY}`)
+      .buffer(true)
+      .parse((r, cb) => {
+        const chunks: Buffer[] = [];
+        r.on('data', (c: Buffer) => chunks.push(c));
+        r.on('end', () => cb(null, Buffer.concat(chunks)));
+      })
+      .expect(200);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(res.body as ArrayBuffer);
+    const ws = wb.worksheets[0]!;
+    expect(ws.getRow(3).getCell(2).text).toBe('ریکارڈ نہیں');
+    const totals = ws.getRow(ws.rowCount);
+    expect(totals.getCell(2).text).toBe('ریکارڈ نہیں');
+    expect(totals.getCell(8).text).toBe('');
   });
 
   it('submitting a day changes A11 at once; an excluded purpose changes only the "kul" figures', async () => {

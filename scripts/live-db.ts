@@ -11,6 +11,7 @@ import { ensureSettings } from '../src/lib/settings.js';
 export async function useLiveDb({ dryRun }: { dryRun: boolean }): Promise<void> {
   process.env.MONGODB_URI = liveDbUri(process.env);
   resetEnvCache();
+  if (dryRun) process.env.USHR_DB_READONLY = '1';
   console.warn(`  database      : ${dbNameOf(process.env.MONGODB_URI)}`);
   await connectDb();
   if (!dryRun) await ensureSettings();

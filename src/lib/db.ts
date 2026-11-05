@@ -12,7 +12,9 @@ export function connectDb(): Promise<typeof mongoose> {
       .connect(env().MONGODB_URI, {
         maxPoolSize: 5,
         serverSelectionTimeoutMS: 5000,
-        autoIndex: true,
+        // USHR_DB_READONLY=1 (import --dry-run): never create collections or indexes.
+        autoIndex: process.env.USHR_DB_READONLY !== '1',
+        autoCreate: process.env.USHR_DB_READONLY !== '1',
       })
       .catch((error: unknown) => {
         // Allow the next request to retry instead of caching a failed connection.

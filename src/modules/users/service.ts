@@ -133,7 +133,13 @@ export async function confirmMobile(caller: AuthUser, userId: string): Promise<v
   if (target.mobileVerified !== false) {
     throw new AppError(409, 'CONFLICT', 'This mobile number is already confirmed');
   }
-  await User.updateOne({ _id: target._id }, { $set: { mobileVerified: true } });
+  const done = await User.updateOne(
+    { _id: target._id, mobile: target.mobile, mobileVerified: false },
+    { $set: { mobileVerified: true } },
+  );
+  if (done.modifiedCount === 0) {
+    throw new AppError(409, 'CONFLICT', 'The number changed meanwhile — load the list again');
+  }
   await audit({
     action: 'MOBILE_CONFIRM',
     actorId: caller.id,
@@ -161,10 +167,13 @@ export async function rejectMobile(caller: AuthUser, userId: string): Promise<vo
   if (!target.mobile || target.mobileVerified !== false) {
     throw new AppError(409, 'CONFLICT', 'This user has no mobile number waiting for confirmation');
   }
-  await User.updateOne(
-    { _id: target._id },
+  const done = await User.updateOne(
+    { _id: target._id, mobile: target.mobile, mobileVerified: false },
     { $unset: { mobile: 1, mobileVerified: 1 }, $inc: { sessionVersion: 1 } },
   );
+  if (done.modifiedCount === 0) {
+    throw new AppError(409, 'CONFLICT', 'The number changed meanwhile — load the list again');
+  }
   await audit({
     action: 'MOBILE_REJECT',
     actorId: caller.id,

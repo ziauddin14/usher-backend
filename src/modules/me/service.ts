@@ -1,9 +1,10 @@
 // Zimmedar's own khulasa (A11), reward tracker (A12) and Excel export. Always calculated from the
 // submitted jadwals; a day without a jadwal is "no record" (never zero, never leave).
+// Scope: the caller's own userId — narrower than any unit path, and a zimmedar moved to another
+// district (re-import) keeps the history recorded under the old one.
 import { Types } from 'mongoose';
 import type { AuthUser } from '../../lib/auth.js';
 import { connectDb } from '../../lib/db.js';
-import { scopeFilter } from '../../lib/scope.js';
 import { getRewardRules, getSettings } from '../../lib/settings.js';
 import { addDays, karachiDate, weekday } from '../../lib/time.js';
 import { Jadwal } from '../../models/jadwal.js';
@@ -77,7 +78,6 @@ interface DayRow {
 async function submittedDays(user: AuthUser, from: string, to: string): Promise<DayRow[]> {
   await connectDb();
   return Jadwal.find({
-    ...scopeFilter(user),
     userId: new Types.ObjectId(user.id),
     status: 'submitted',
     date: { $gte: from, $lte: to },
@@ -145,7 +145,6 @@ export async function reward(user: AuthUser) {
   const rows = await Jadwal.aggregate<{ _id: string; amount: number; days: number }>([
     {
       $match: {
-        ...scopeFilter(user),
         userId: new Types.ObjectId(user.id),
         status: 'submitted',
         month: { $in: [...prev.months, ...period.months] },
@@ -166,6 +165,8 @@ export async function reward(user: AuthUser) {
   const daysOf = (month: string) => rows.find((r) => r._id === month)?.days ?? 0;
   return {
     today,
+    /** settings.reward.divisor, for the "کل ÷ N" labels. */
+    divisor: rules.divisor,
     ...status,
     months: status.months.map((m) => ({ ...m, recordDays: daysOf(m.month) })),
     previous: {

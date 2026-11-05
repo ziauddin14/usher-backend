@@ -426,7 +426,6 @@ export async function importEmployees(
               ajeerCodeFull: row.ajeerCodeFull,
               ...(row.nameUr ? { nameUr: row.nameUr } : {}),
               ...(row.fatherName ? { fatherName: row.fatherName } : {}),
-              ...(fillsMobile(row) ? { mobile: row.mobile, mobileVerified: true } : {}),
               role: row.role,
               ...(row.zimmedari ? { zimmedari: row.zimmedari } : {}),
               unitCode: unit.code,
@@ -445,6 +444,19 @@ export async function importEmployees(
         },
       })),
     );
+    // Only users without a number get the file's number — the filter makes sure a number saved
+    // meanwhile (e.g. typed at a first login during the import) is never replaced.
+    const fills = assignments.filter(({ row }) => fillsMobile(row));
+    if (fills.length > 0) {
+      await User.bulkWrite(
+        fills.map(({ row }) => ({
+          updateOne: {
+            filter: { ajeerCode: row.ajeerCode, mobile: { $exists: false } },
+            update: { $set: { mobile: row.mobile, mobileVerified: true } },
+          },
+        })),
+      );
+    }
   }
   return result;
 }

@@ -14,8 +14,9 @@ import { changePassword, login, publicUser, requestPasswordReset } from './servi
 const FIFTEEN_MINUTES = 15 * 60 * 1000;
 
 /**
- * 5 failed logins per Ajeer code + IP in 15 minutes → 429. Successful logins, and the
- * "now enter your mobile" step of a first login, do not count.
+ * 5 failed logins per Ajeer code + IP in 15 minutes → 429. Successful logins, the
+ * "now enter your mobile" step of a first login and "mobile waits for the District"
+ * (MOBILE_PENDING — the password was right) do not count.
  * In-memory store: per serverless instance (enough for the demo).
  */
 function loginLimiter() {
@@ -62,7 +63,10 @@ export function authRouter(): Router {
       setSessionCookie(res, signSession(user));
       res.json({ user: await publicUser(user) });
     } catch (error) {
-      if (error instanceof AppError && error.code === 'MOBILE_REQUIRED') {
+      if (
+        error instanceof AppError &&
+        (error.code === 'MOBILE_REQUIRED' || error.code === 'MOBILE_PENDING')
+      ) {
         (res.locals as { mobileStep?: boolean }).mobileStep = true;
       }
       throw error;

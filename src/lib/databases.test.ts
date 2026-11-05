@@ -44,5 +44,14 @@ describe('databases', () => {
     expect(seedRefusal(atlas, true, 'ushr_demo')).toBeNull();
     expect(() => assertDemoDb('mongodb://localhost:27017/ushr_live')).toThrow(/live/);
     expect(() => assertDemoDb(demo)).not.toThrow();
+    // Allow-list: only ushr_demo (+ e2e) and test databases, never anything else.
+    expect(() => assertDemoDb('mongodb://localhost:27017/ushr_demo_e2e')).not.toThrow();
+    expect(() => assertDemoDb('mongodb://localhost:27017/ushr_test_ab12')).not.toThrow();
+    expect(() => assertDemoDb('mongodb://localhost:27017/ushr')).toThrow(/only ushr_demo/);
+    expect(() => assertDemoDb('mongodb://localhost:27017/ushr_prod')).toThrow(/only ushr_demo/);
+    expect(() => assertDemoDb('mongodb://localhost:27017')).toThrow(/only ushr_demo/);
+    expect(seedRefusal('mongodb://localhost:27017/ushr_prod', false, undefined)).toMatch(
+      /only ushr_demo/,
+    );
   });
 });

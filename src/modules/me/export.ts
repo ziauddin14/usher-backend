@@ -59,7 +59,11 @@ export async function buildMeWorkbook(input: {
       ...Object.fromEntries(COLUMNS.slice(2).map((c) => [c.key, t[c.key as keyof Kpis] ?? 0])),
     });
   }
-  const total = ws.addRow({ date: 'کل', ...input.totals });
+  // A period without any submitted jadwal is "no record", not a row of zeros.
+  const hasRecord = input.rows.some((r) => r.day);
+  const total = ws.addRow(
+    hasRecord ? { date: 'کل', ...input.totals } : { date: 'کل', entryType: NO_RECORD },
+  );
   total.font = { bold: true };
   for (const c of COLUMNS.slice(5)) {
     if (['niyyat', 'wusooli', 'rewardWusooli', 'gsbAmount', 'fare'].includes(c.key)) {

@@ -2,6 +2,8 @@
 // every seeded zimmedar, i.e. the whole previous reward period (H1-2026) and the current one.
 // Totals are computed with computeDayTotals, never typed by hand.
 import { Types } from 'mongoose';
+import { assertDemoDb } from '../lib/databases.js';
+import { env } from '../lib/env.js';
 import { getRewardRules, getSettings } from '../lib/settings.js';
 import { addDays, karachiDate } from '../lib/time.js';
 import { Jadwal } from '../models/jadwal.js';
@@ -161,6 +163,7 @@ export async function seedHistory(
   today = karachiDate(),
   { ajeerCodes }: { ajeerCodes?: string[] } = {},
 ): Promise<HistoryResult> {
+  assertDemoDb(env().MONGODB_URI); // invented history only ever goes into ushr_demo
   const settings = await getSettings();
   const categories: Category[] = settings.atiyatCategories.map((c) => ({
     id: c.id,
@@ -319,11 +322,12 @@ export async function seedHistory(
     const toInsert = docs
       .filter((doc) => {
         const date = doc.date as string;
-        return (
-          date <= yesterday &&
-          !existing.has(date) &&
-          date > (lastInMonth.get(date.slice(0, 7)) ?? '')
-        );
+        const month = date.slice(0, 7);
+        const last = lastInMonth.get(month);
+        // A month with records is finished as it is (it may come from an older generator);
+        // only the current month is continued after its last record.
+        if (last && month !== today.slice(0, 7)) return false;
+        return date <= yesterday && !existing.has(date) && date > (last ?? '');
       })
       .map((doc) => ({
         ...doc,

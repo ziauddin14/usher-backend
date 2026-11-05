@@ -142,6 +142,49 @@ describe('first login with the initial password 123', () => {
     expect(retry.body.error.code).toBe('MOBILE_PENDING');
   });
 
+  it('confirm / reject: only lower-level users in scope; audits keep the number masked', async () => {
+    const z = await User.findOne({
+      unitCode: 'GHOTKI',
+      role: 'zimmedar',
+      ajeerCode: { $nin: ['9090412', noMobile] },
+    })
+      .sort({ ajeerCode: -1 })
+      .lean();
+    await makeNewUser(z!.ajeerCode);
+    // A correct password with a pending number is not a failed login: no rate limit.
+    for (let i = 0; i < 7; i += 1) {
+      const res = await login({ ajeerCode: z!.ajeerCode, password: '123', mobile: '03024445566' });
+      expect(res.body.error.code).toBe('MOBILE_PENDING');
+    }
+    const id = String(z!._id);
+    const district = await loginCookie(app, '9040001');
+    const zimmedar = await loginCookie(app, '9090412');
+    const districtId = String((await User.findOne({ ajeerCode: '9040001' }).lean())!._id);
+    // A zimmedar cannot confirm anything; a district cannot confirm itself (same level).
+    await request(app)
+      .post(`/api/v1/users/${id}/confirm-mobile`)
+      .set('Cookie', zimmedar)
+      .expect(403);
+    await request(app)
+      .post(`/api/v1/users/${districtId}/reject-mobile`)
+      .set('Cookie', district)
+      .expect(403);
+    await request(app)
+      .post(`/api/v1/users/${id}/confirm-mobile`)
+      .set('Cookie', district)
+      .expect(200);
+
+    const audits = await AuditLog.find({
+      action: { $in: ['MOBILE_SELF_REGISTER', 'MOBILE_CONFIRM', 'MOBILE_REJECT'] },
+    }).lean();
+    expect(audits.length).toBeGreaterThan(0);
+    for (const a of audits) {
+      const shown = String((a.details as { mobile?: string } | undefined)?.mobile ?? '');
+      expect(shown).toMatch(/^03\d{2}•••\d{4}$/);
+    }
+    expect(JSON.stringify(audits)).not.toContain('03024445566');
+  });
+
   it('a user whose mobile is still pending cannot use an older session', async () => {
     const z = await User.findOne({ ajeerCode: '9090412' }).lean();
     const cookie = await loginCookie(app, '9090412');

@@ -42,7 +42,7 @@ describe('seedHistory (invented jadwal history, Dec 2025 → yesterday)', () => 
     const last = await Jadwal.findOne({ ajeerCode: other }).sort({ date: -1 }).lean();
     expect(first!.date >= '2025-12-01').toBe(true);
     expect(first!.date <= '2025-12-05').toBe(true);
-    expect(last!.date <= '2026-10-30').toBe(true);
+    expect(last!.date <= '2026-10-31').toBe(true); // yesterday at most
     expect(await Jadwal.countDocuments({ date: TODAY })).toBe(0);
     expect(await Jadwal.countDocuments({ status: { $ne: 'submitted' } })).toBe(0);
     // Only invented 7-digit demo codes.
@@ -71,5 +71,46 @@ describe('seedHistory (invented jadwal history, Dec 2025 → yesterday)', () => 
     expect(await Jadwal.countDocuments({ date: { $gte: '2026-11-06' } })).toBe(0);
     // Running it again the same day adds nothing.
     expect((await seedHistory('2026-11-06', { ajeerCodes: ['9090412', other] })).jadwals).toBe(0);
+  });
+
+  it('a month continued on a later day equals the same month seeded in one run', async () => {
+    const z = await User.findOne({ role: 'zimmedar', unitCode: 'SUKKUR_DIST' })
+      .sort({ ajeerCode: 1 })
+      .lean();
+    const code = z!.ajeerCode;
+    const novDays = async () =>
+      (await Jadwal.find({ ajeerCode: code, month: '2026-11' }).sort({ date: 1 }).lean()).map(
+        (d) => [d.date, d.entryType, d.totals?.rewardWusooli],
+      );
+    await seedHistory('2026-11-04', { ajeerCodes: [code] });
+    await seedHistory('2026-11-12', { ajeerCodes: [code] });
+    const twoRuns = await novDays();
+    await Jadwal.deleteMany({ ajeerCode: code });
+    await seedHistory('2026-11-12', { ajeerCodes: [code] });
+    expect(await novDays()).toEqual(twoRuns);
+  });
+
+  it('never adds days to a finished month that already has records (older generators)', async () => {
+    const z = await User.findOne({ role: 'zimmedar', unitCode: 'KHAIRPUR' })
+      .sort({ ajeerCode: 1 })
+      .lean();
+    // An October seeded earlier by another generator: one day only.
+    await Jadwal.create({
+      userId: z!._id,
+      ajeerCode: z!.ajeerCode,
+      unitPath: z!.unitPath,
+      date: '2026-10-05',
+      month: '2026-10',
+      entryType: 'rukhsat',
+      status: 'submitted',
+      startedAt: new Date('2026-10-05T04:00:00Z'),
+      submittedAt: new Date('2026-10-05T04:00:00Z'),
+      visits: [],
+    });
+    await seedHistory(TODAY, { ajeerCodes: [z!.ajeerCode] });
+    expect(await Jadwal.countDocuments({ ajeerCode: z!.ajeerCode, month: '2026-10' })).toBe(1);
+    expect(
+      await Jadwal.countDocuments({ ajeerCode: z!.ajeerCode, month: '2026-09' }),
+    ).toBeGreaterThan(15);
   });
 });
