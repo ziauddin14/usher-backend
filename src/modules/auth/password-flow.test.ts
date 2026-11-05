@@ -169,13 +169,41 @@ describe('first login with the initial password 123', () => {
       .post(`/api/v1/users/${districtId}/reject-mobile`)
       .set('Cookie', district)
       .expect(403);
+    // The District sees the full pending number (audited, masked in the log); nobody else does.
+    const view = await request(app)
+      .get(`/api/v1/users/${id}/pending-mobile`)
+      .set('Cookie', district)
+      .expect(200);
+    expect(view.body).toEqual({ mobile: '03024445566' });
+    expect(view.headers['cache-control']).toBe('no-store');
+    const division = await loginCookie(app, '9030001');
+    await request(app)
+      .get(`/api/v1/users/${id}/pending-mobile`)
+      .set('Cookie', division)
+      .expect(403);
+    await request(app)
+      .get(`/api/v1/users/${id}/pending-mobile`)
+      .set('Cookie', zimmedar)
+      .expect(403);
+    const outside = await User.findOne({ role: 'zimmedar', unitCode: { $ne: 'GHOTKI' } }).lean();
+    await request(app)
+      .get(`/api/v1/users/${String(outside!._id)}/pending-mobile`)
+      .set('Cookie', district)
+      .expect(404);
+    expect(await AuditLog.countDocuments({ action: 'MOBILE_VIEW', targetId: id })).toBe(1);
+
     await request(app)
       .post(`/api/v1/users/${id}/confirm-mobile`)
       .set('Cookie', district)
       .expect(200);
+    // Confirmed → no pending number left to show.
+    await request(app)
+      .get(`/api/v1/users/${id}/pending-mobile`)
+      .set('Cookie', district)
+      .expect(409);
 
     const audits = await AuditLog.find({
-      action: { $in: ['MOBILE_SELF_REGISTER', 'MOBILE_CONFIRM', 'MOBILE_REJECT'] },
+      action: { $in: ['MOBILE_SELF_REGISTER', 'MOBILE_CONFIRM', 'MOBILE_REJECT', 'MOBILE_VIEW'] },
     }).lean();
     expect(audits.length).toBeGreaterThan(0);
     for (const a of audits) {

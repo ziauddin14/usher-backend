@@ -184,3 +184,35 @@ export async function rejectMobile(caller: AuthUser, userId: string): Promise<vo
     details: { targetAjeerCode: target.ajeerCode, mobile: maskMobile(target.mobile) },
   });
 }
+
+/**
+ * The full self-entered number, for the District that has to check it with the employee before
+ * confirming (CTO 5 Nov 2026). Only a district user, only for a lower-level user in its scope whose
+ * number is still pending. Audit MOBILE_VIEW (who, when — the log keeps the number masked).
+ */
+export async function viewPendingMobile(caller: AuthUser, userId: string): Promise<string> {
+  if (caller.role !== 'district') {
+    throw new AppError(403, 'FORBIDDEN', 'Only the District sees a full pending number');
+  }
+  await connectDb();
+  const target = Types.ObjectId.isValid(userId)
+    ? await User.findById(userId).select('ajeerCode role unitPath mobile mobileVerified').lean()
+    : null;
+  assertInScope(caller, target);
+  if (ROLE_RANK[target.role] >= ROLE_RANK[caller.role]) {
+    throw new AppError(403, 'FORBIDDEN', 'Only users below your level');
+  }
+  if (!target.mobile || target.mobileVerified !== false) {
+    throw new AppError(409, 'CONFLICT', 'This user has no mobile number waiting for confirmation');
+  }
+  await audit({
+    action: 'MOBILE_VIEW',
+    actorId: caller.id,
+    actorAjeerCode: caller.ajeerCode,
+    targetType: 'user',
+    targetId: String(target._id),
+    unitPath: target.unitPath,
+    details: { targetAjeerCode: target.ajeerCode, mobile: maskMobile(target.mobile) },
+  });
+  return target.mobile;
+}

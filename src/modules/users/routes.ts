@@ -7,6 +7,7 @@ import {
   listResetRequests,
   listUsers,
   rejectMobile,
+  viewPendingMobile,
   resetPassword,
 } from './service.js';
 
@@ -33,6 +34,13 @@ export function usersRouter(): Router {
     const { id } = parse(userIdParams, req.params);
     await confirmMobile(currentUser(req), id);
     res.json({ ok: true });
+  });
+
+  // Full pending number for the District (audited); never cached by the browser.
+  router.get('/:id/pending-mobile', async (req, res) => {
+    const { id } = parse(userIdParams, req.params);
+    const mobile = await viewPendingMobile(currentUser(req), id);
+    res.set('Cache-Control', 'no-store').json({ mobile });
   });
 
   router.post('/:id/reject-mobile', async (req, res) => {
