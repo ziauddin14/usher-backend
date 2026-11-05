@@ -171,7 +171,7 @@ export const DEMO_USERS: SeedUser[] = [
 
 export const DEMO_PASSWORD = 'demo1234';
 
-const FIRST: [string, string][] = [
+export const FIRST: [string, string][] = [
   ['Ahmed', 'احمد'],
   ['Ali', 'علی'],
   ['Bilal', 'بلال'],
@@ -193,7 +193,7 @@ const FIRST: [string, string][] = [
   ['Irfan', 'عرفان'],
   ['Saeed', 'سعید'],
 ];
-const LAST: [string, string][] = [
+export const LAST: [string, string][] = [
   ['Raza', 'رضا'],
   ['Hussain', 'حسین'],
   ['Iqbal', 'اقبال'],

@@ -11,6 +11,7 @@ import { Unit } from '../models/unit.js';
 import { User } from '../models/user.js';
 import { Village } from '../models/village.js';
 import { BCRYPT_COST } from '../modules/auth/service.js';
+import { seedHistory } from './history.js';
 import {
   DEMO_PASSWORD,
   DEMO_USERS,
@@ -77,13 +78,16 @@ export interface SeedResult {
   units: number;
   users: number;
   villages: number;
+  jadwals: number;
 }
 
 /**
- * Idempotent demo seed: units, settings, users, villages.
- * Existing passwords and edited settings are kept; `reset` wipes the demo collections first.
+ * Idempotent demo seed: units, settings, users, villages, and (with `history`) the invented
+ * jadwal history 1 Jun 2026 → yesterday. Existing passwords, edited settings and existing days are
+ * kept; `reset` wipes the demo collections first. Tests that create their own days leave
+ * `history` off.
  */
-export async function seedDemo({ reset = false } = {}): Promise<SeedResult> {
+export async function seedDemo({ reset = false, history = false } = {}): Promise<SeedResult> {
   await connectDb();
 
   if (reset) {
@@ -168,8 +172,7 @@ export async function seedDemo({ reset = false } = {}): Promise<SeedResult> {
   await Village.bulkWrite(villageOps);
   await assignSeedVillages();
 
-  // TODO(Step 3): seed jadwal history 1 Jun 2026 → yesterday (data model "Seed" → Jadwals),
-  // including the exact monthly reward-wusooli for 9090412.
+  const { jadwals } = history ? await seedHistory() : { jadwals: 0 };
 
-  return { units: units.length, users: users.length, villages: villageOps.length };
+  return { units: units.length, users: users.length, villages: villageOps.length, jadwals };
 }

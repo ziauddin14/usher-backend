@@ -32,9 +32,9 @@ async function main(): Promise<void> {
       return;
     }
   }
-  const result = await seedDemo({ reset });
+  const result = await seedDemo({ reset, history: true });
   console.warn(
-    `Seed done${reset ? ' (after reset)' : ''}: ${result.units} units, ${result.users} users, ${result.villages} villages.`,
+    `Seed done${reset ? ' (after reset)' : ''}: ${result.units} units, ${result.users} users, ${result.villages} villages, ${result.jadwals} new history days.`,
   );
   await disconnectDb();
 }

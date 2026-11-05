@@ -8,6 +8,7 @@ import { errorHandler, notFoundHandler } from './lib/errors.js';
 import { authRouter } from './modules/auth/routes.js';
 import { healthRouter } from './modules/health/routes.js';
 import { jadwalsRouter } from './modules/jadwals/routes.js';
+import { meRouter } from './modules/me/routes.js';
 import { metaRouter } from './modules/meta/routes.js';
 import { usersRouter } from './modules/users/routes.js';
 import { villagesRouter } from './modules/villages/routes.js';
@@ -45,6 +46,7 @@ export function createApp(): Express {
   api.use('/users', usersRouter());
   api.use('/villages', villagesRouter());
   api.use('/jadwals', jadwalsRouter());
+  api.use('/me', meRouter());
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);
