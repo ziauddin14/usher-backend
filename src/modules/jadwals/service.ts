@@ -396,7 +396,7 @@ export async function reopenJadwal(
     { returnDocument: 'before' },
   ).lean();
   if (!before) throw new AppError(409, 'CONFLICT', 'Only a submitted jadwal can be reopened');
-  const clearedDuty = before.dutyApproval?.status ?? null;
+  const cleared = before.dutyApproval ?? null;
   const doc = await Jadwal.findById(found._id);
   if (!doc) throw new AppError(404, 'NOT_FOUND', 'Jadwal not found');
   await audit({
@@ -410,7 +410,18 @@ export async function reopenJadwal(
       date: doc.date,
       ajeerCode: doc.ajeerCode,
       reason,
-      ...(clearedDuty ? { clearedDutyApproval: clearedDuty } : {}),
+      ...(cleared
+        ? {
+            clearedDutyApproval: cleared.status,
+            // The full decision this reopen removed (the audit log keeps every decision).
+            clearedDutyDecision: {
+              status: cleared.status,
+              byAjeerCode: cleared.byAjeerCode,
+              at: cleared.at,
+              reason: cleared.reason ?? null,
+            },
+          }
+        : {}),
     },
   });
   return serializeJadwal(doc);

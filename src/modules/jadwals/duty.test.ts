@@ -23,8 +23,32 @@ const get = (url: string, who: string) =>
   request(app).get(`/api/v1${url}`).set('Cookie', cookies[who]!);
 const post = (url: string, who: string, body: object = {}) =>
   request(app).post(`/api/v1${url}`).set('Cookie', cookies[who]!).send(body);
-const decide = (id: string, who: string, decision: string, reason?: string) =>
-  post(`/jadwals/${id}/duty-approval`, who, { decision, ...(reason ? { reason } : {}) });
+/**
+ * Decide as a screen would: `expected` = the decision it shows (default: the one stored now).
+ * `decide(...).expect(status)` resolves to the response, like a supertest request.
+ */
+const decide = (
+  id: string,
+  who: string,
+  decision: string,
+  reason?: string,
+  expected?: string | null,
+) => ({
+  expect: async (status: number) => {
+    const seen =
+      expected !== undefined
+        ? expected
+        : Types.ObjectId.isValid(id)
+          ? ((await Jadwal.findById(id).select('dutyApproval').lean())?.dutyApproval?.status ??
+            null)
+          : null;
+    return post(`/jadwals/${id}/duty-approval`, who, {
+      decision,
+      expected: seen,
+      ...(reason ? { reason } : {}),
+    }).expect(status);
+  },
+});
 
 interface Tiles {
   zimmedaran: number;
@@ -164,13 +188,39 @@ describe('official-duty approval of a full-day mashwara', () => {
     expect(log!.at).toBeInstanceOf(Date);
   });
 
+  it('changing a decision needs a reason; repeating it changes nothing; history is kept in full', async () => {
+    // Rejected → approve without a reason (or a too short one): refused, nothing changes.
+    for (const reason of [undefined, 'abc']) {
+      const r = await decide(mashwaraId, '9040001', 'approve', reason).expect(400);
+      expect(r.body.error.details).toMatchObject({ field: 'reason', reason: 'REASON_REQUIRED' });
+    }
+    expect(await todayOf('9090412')).toBe('mashwara_full');
+    expect(await dutyCell()).toBe('Duty mustarad');
+    // Repeating the current decision: 200, no write, no second audit entry.
+    await decide(mashwaraId, '9040001', 'reject').expect(200);
+    expect(await AuditLog.countDocuments({ action: 'MASHWARA_DUTY_REJECT' })).toBe(1);
+  });
+
   it('an approved mashwara counts in both; dashboard, children, Excel and print data agree', async () => {
-    await decide(mashwaraId, '9040001', 'approve').expect(200);
+    await decide(mashwaraId, '9040001', 'approve', 'Sarkari hukm mil gaya').expect(200);
     const j = (await get(`/jadwals/${mashwaraId}`, '9040001').expect(200)).body.jadwal;
-    expect(j.dutyApproval).toMatchObject({ status: 'approved', byAjeerCode: '9040001' });
-    expect(await AuditLog.findOne({ action: 'MASHWARA_DUTY_APPROVE' }).lean()).toMatchObject({
+    expect(j.dutyApproval).toMatchObject({
+      status: 'approved',
+      byAjeerCode: '9040001',
+      reason: 'Sarkari hukm mil gaya',
+    });
+    const approveLog = await AuditLog.findOne({ action: 'MASHWARA_DUTY_APPROVE' }).lean();
+    expect(approveLog).toMatchObject({
       actorAjeerCode: '9040001',
-      details: { previous: 'rejected' },
+      details: {
+        previous: 'rejected',
+        previousDecision: {
+          status: 'rejected',
+          byAjeerCode: '9040001',
+          reason: 'Duty ka hukm nahi tha',
+        },
+        reason: 'Sarkari hukm mil gaya',
+      },
     });
     expect(await todayOf('9090412')).toBe('mashwara_duty');
 
@@ -236,7 +286,27 @@ describe('official-duty approval of a full-day mashwara', () => {
     expect((await Jadwal.findById(mashwaraId).lean())!.dutyApproval).toBeUndefined();
     expect(
       await AuditLog.findOne({ action: 'JADWAL_REOPEN', targetId: mashwaraId }).lean(),
-    ).toMatchObject({ details: { clearedDutyApproval: 'approved' } });
+    ).toMatchObject({
+      details: {
+        clearedDutyApproval: 'approved',
+        clearedDutyDecision: {
+          status: 'approved',
+          byAjeerCode: '9040001',
+          reason: 'Sarkari hukm mil gaya',
+        },
+      },
+    });
+    // Every earlier decision is still in the audit history.
+    expect(
+      (
+        await AuditLog.find({
+          targetId: mashwaraId,
+          action: { $in: ['MASHWARA_DUTY_APPROVE', 'MASHWARA_DUTY_REJECT'] },
+        })
+          .sort({ _id: 1 })
+          .lean()
+      ).map((l) => l.action),
+    ).toEqual(['MASHWARA_DUTY_REJECT', 'MASHWARA_DUTY_APPROVE']);
     const draft = await decide(mashwaraId, '9040001', 'approve').expect(409);
     expect(draft.body.error.details).toMatchObject({ reason: 'NOT_SUBMITTED' });
     // Excel agrees with the screen and print: a draft has no duty state.
@@ -286,6 +356,60 @@ describe('official-duty approval of a full-day mashwara', () => {
     spy.mockRestore();
     expect((await Jadwal.findById(mashwaraId).lean())!.dutyApproval).toBeUndefined();
     expect(await todayOf('9090412')).toBe('mashwara_full');
+
+    // Another decision lands between this request's read and its write (simulated): 409 — a
+    // change never slips past the reason rule by overwriting a decision it did not see.
+    const owner = await User.findOne({ ajeerCode: '9090412' }).lean();
+    const spy2 = vi.spyOn(Jadwal, 'updateOne').mockImplementationOnce(((
+      filter: Record<string, unknown>,
+      update: Record<string, unknown>,
+    ) =>
+      Jadwal.collection
+        .updateOne(
+          { _id: new Types.ObjectId(mashwaraId) },
+          {
+            $set: {
+              dutyApproval: {
+                status: 'rejected',
+                by: owner!._id,
+                byAjeerCode: '9040001',
+                at: new Date(),
+              },
+            },
+          },
+        )
+        .then(() => original(filter, update))) as unknown as typeof Jadwal.updateOne);
+    const raced = await decide(mashwaraId, '9040001', 'approve').expect(409);
+    expect(raced.body.error.message).toMatch(/changed meanwhile/);
+    spy2.mockRestore();
+    expect((await Jadwal.findById(mashwaraId).lean())!.dutyApproval).toMatchObject({
+      status: 'rejected',
+    });
+    // A screen that still shows "undecided" while the jadwal is already rejected: 409, nothing
+    // written (no silent 200, no reason rule skipped).
+    const stale2 = await decide(mashwaraId, '9040001', 'reject', undefined, null).expect(409);
+    expect(stale2.body.error.details).toMatchObject({
+      reason: 'DECISION_CHANGED',
+      current: 'rejected',
+    });
+    // An existing decision replaced between read and write (same status, newer time): 409.
+    const t1 = (await Jadwal.findById(mashwaraId).lean())!.dutyApproval!;
+    const spy3 = vi
+      .spyOn(Jadwal, 'updateOne')
+      .mockImplementationOnce(((filter: Record<string, unknown>, update: Record<string, unknown>) =>
+        Jadwal.collection
+          .updateOne(
+            { _id: new Types.ObjectId(mashwaraId) },
+            { $set: { 'dutyApproval.at': new Date(t1.at.getTime() + 60_000) } },
+          )
+          .then(() => original(filter, update))) as unknown as typeof Jadwal.updateOne);
+    const raced2 = await decide(mashwaraId, '9040001', 'approve', 'Hukm ab mila').expect(409);
+    expect(raced2.body.error.message).toMatch(/changed meanwhile/);
+    spy3.mockRestore();
+    const kept = (await Jadwal.findById(mashwaraId).lean())!.dutyApproval!;
+    expect(kept.status).toBe('rejected');
+    expect(kept.at.getTime()).toBe(t1.at.getTime() + 60_000);
+    await Jadwal.updateOne({ _id: mashwaraId }, { $unset: { dutyApproval: 1 } }); // fixture only
 
     // Two submits of the same draft: the second never overwrites the first.
     await post(`/jadwals/${mashwaraId}/reopen`, '9040001', { reason: 'Dobara dekhein' }).expect(
