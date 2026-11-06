@@ -15,6 +15,8 @@ export const BCRYPT_COST = 10;
 export interface PublicUser {
   /** Designated permissions (e.g. VERIFY_SUBA_MOBILE) — the UI shows the matching actions. */
   permissions: string[];
+  /** Department of a centrally provisioned account (CENTRAL_IT), else absent. */
+  department?: string;
   id: string;
   ajeerCode: string;
   name: string;
@@ -47,6 +49,7 @@ export async function publicUser(user: AuthUser): Promise<PublicUser> {
     },
     mustChangePassword: user.mustChangePassword,
     permissions: user.permissions ?? [],
+    ...(user.department ? { department: user.department } : {}),
   };
 }
 
@@ -150,6 +153,8 @@ export async function login(
     unitPath: user.unitPath,
     mustChangePassword: user.mustChangePassword,
     sessionVersion: user.sessionVersion ?? 0,
+    permissions: user.permissions ?? [],
+    ...(user.department ? { department: user.department } : {}),
   };
   return authUser;
 }

@@ -6,9 +6,10 @@ import bcrypt from 'bcryptjs';
 import ExcelJS from 'exceljs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Unit } from '../../models/unit.js';
-import { User } from '../../models/user.js';
+import { NOT_CENTRALLY_MANAGED, User } from '../../models/user.js';
 import { seedDemo } from '../../seed/seed.js';
-import { importEmployees, readEmployeeSheet, validateRows } from './employees.js';
+import { provisionPakistanAdmin } from '../users/provision.js';
+import { importEmployees, readEmployeeSheet, validateRows, ZIMMEDARI_MAP } from './employees.js';
 
 const HEADER = [
   'Ajeer Code',
@@ -216,5 +217,110 @@ describe('employee import', () => {
       mobile: '03001112244',
       mobileVerified: true,
     });
+  });
+});
+
+describe('employee import never creates or changes a Pakistan Admin (CTO 6 Nov 2026)', () => {
+  let pdir: string;
+  beforeAll(async () => {
+    pdir = await mkdtemp(join(tmpdir(), 'ushr-import-pk-'));
+    await seedDemo({ reset: true });
+    const r = await provisionPakistanAdmin({
+      ajeerCode: '881001',
+      name: 'Provisioned Admin',
+      nominationRef: 'NOM/T/1',
+      approvalRef: 'APR/T/1',
+      operator: 'Central IT',
+      department: 'CENTRAL_IT',
+    });
+    expect(r.ok).toBe(true);
+  });
+  afterAll(async () => {
+    await rm(pdir, { recursive: true, force: true });
+  });
+
+  it('no designation maps to the pakistan role', () => {
+    expect(Object.values(ZIMMEDARI_MAP).some((m) => m.role === 'pakistan')).toBe(false);
+  });
+
+  it('a "Pakistan" row is refused; a provisioned / pakistan account in the file is never changed', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Employees');
+    ws.addRow(HEADER);
+    ws.addRow([881002, 'Wants Pakistan', '', 'Pakistan', 'Interior Sindh', 'Sukkur', 'Ghotki', '']);
+    ws.addRow([
+      881003,
+      'Pakistan Admin',
+      '',
+      'Pakistan Admin',
+      'Interior Sindh',
+      'Sukkur',
+      'Ghotki',
+      '',
+    ]);
+    // The provisioned admin, listed in the file as an ordinary suba row.
+    ws.addRow([
+      881001,
+      'Renamed By File',
+      '',
+      'Suba',
+      'Interior Sindh',
+      'Sukkur',
+      'Ghotki',
+      '03001234567',
+    ]);
+    const path = join(pdir, 'pk.xlsx');
+    await wb.xlsx.writeFile(path);
+    const before = await User.findOne({ ajeerCode: '881001' }).lean();
+
+    const result = await importEmployees(await readEmployeeSheet(path), { dryRun: false });
+    expect(result).toMatchObject({ created: 0, updated: 0 });
+    const msgs = result.errors.map((e) => `${e.ajeerCode}: ${e.message}`);
+    expect(msgs).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^881002: .*Zimmedari/),
+        expect.stringMatching(/^881003: .*Zimmedari/),
+        expect.stringMatching(/^881001: .*centrally provisioned/),
+      ]),
+    );
+    expect(await User.countDocuments({ ajeerCode: { $in: ['881002', '881003'] } })).toBe(0);
+    const after = await User.findOne({ ajeerCode: '881001' }).lean();
+    expect(after).toMatchObject({
+      role: 'pakistan',
+      name: 'Provisioned Admin',
+      unitPath: 'PK',
+      department: 'CENTRAL_IT',
+    });
+    expect(after!.mobile).toBeUndefined();
+    expect(after!.updatedAt).toEqual(before!.updatedAt);
+    expect(await User.countDocuments({ role: 'pakistan', isDemo: false })).toBe(1);
+  });
+
+  it('the upsert filter itself never matches a centrally managed account (fails instead)', async () => {
+    await expect(
+      User.updateOne(
+        { ajeerCode: '881001', ...NOT_CENTRALLY_MANAGED },
+        { $set: { role: 'district' } },
+        { upsert: true },
+      ),
+    ).rejects.toThrow(/duplicate key/);
+    expect((await User.findOne({ ajeerCode: '881001' }).lean())!.role).toBe('pakistan');
+    // An ordinary upsert through the same filter stores no department / provisioned field.
+    await User.updateOne(
+      { ajeerCode: '881009', ...NOT_CENTRALLY_MANAGED },
+      {
+        $set: {
+          name: 'Plain',
+          role: 'zimmedar',
+          unitCode: 'GHOTKI',
+          unitPath: 'PK/INT_SINDH/SUKKUR/GHOTKI',
+        },
+        $setOnInsert: { passwordHash: 'x' },
+      },
+      { upsert: true },
+    );
+    const plain = await User.collection.findOne({ ajeerCode: '881009' });
+    expect(plain).not.toHaveProperty('department');
+    expect(plain).not.toHaveProperty('provisioned');
   });
 });

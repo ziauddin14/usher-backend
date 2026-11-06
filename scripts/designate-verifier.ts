@@ -1,60 +1,61 @@
-// pnpm designate:verifier <ajeerCode> --db demo|live --confirm=<database name>
-//      → give VERIFY_SUBA_MOBILE to a pakistan account (add --revoke to take it away)
+// pnpm designate:verifier <ajeerCode> --permission VERIFY_SUBA_MOBILE|VERIFY_PAKISTAN_MOBILE
+//      --operator "<Central IT operator>" --reference <decision reference>
+//      --db demo|live --confirm=<database name> [--revoke]
+// The operator is the audit actor and the reference (the authority's decision / letter) is kept in
+// the audit details, so every designation and revoke says who did it and on whose decision.
 // The operator always names the database: `--db demo` = MONGODB_URI (demo/test databases only),
 // `--db live` = the live database (same rule as the imports). Nothing is written unless
-// --confirm equals that database's name (like SEED_CONFIRM). Only an active pakistan-level account
-// can be designated (CTO 5 Nov 2026: "designated Pakistan Admin only"). Every change is audited
+// --confirm equals that database's name (like SEED_CONFIRM).
+// VERIFY_SUBA_MOBILE: only an active pakistan-level account ("designated Pakistan Admin").
+// VERIFY_PAKISTAN_MOBILE: only an active pakistan-level account of the Central IT Department
+// ("designated Central IT verifier", provisioned with --central-it). Every change is audited
 // (USER_PERMISSION). Who is designated is the organization's decision.
-import { connectDb, disconnectDb } from '../src/lib/db.js';
-import { adminTargetUri, dbNameOf } from '../src/lib/databases.js';
-import { resetEnvCache } from '../src/lib/env.js';
+import { disconnectDb } from '../src/lib/db.js';
+import { PERMISSIONS, type Permission } from '../src/models/user.js';
 import { setPermission } from '../src/modules/users/permissions.js';
+import { connectConfirmedDb, option, positional } from './admin-cli.js';
 
 const USAGE =
-  'Usage: pnpm designate:verifier <ajeerCode> --db demo|live --confirm=<database name> [--revoke]';
-
-function option(args: string[], name: string): string | undefined {
-  const i = args.indexOf(`--${name}`);
-  if (i >= 0) return args[i + 1];
-  return args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
-}
+  'Usage: pnpm designate:verifier <ajeerCode> --permission VERIFY_SUBA_MOBILE|VERIFY_PAKISTAN_MOBILE --operator "<who>" --reference <ref> --db demo|live --confirm=<database name> [--revoke]';
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  const target = option(args, 'db');
-  const ajeerCode = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--db');
+  const ajeerCode = positional(args, ['db', 'confirm', 'permission', 'operator', 'reference']);
+  const permission = option(args, 'permission');
+  const operator = option(args, 'operator')?.trim();
+  const reference = option(args, 'reference')?.trim();
+  if (!operator || !/^[\p{L}\p{N} ._-]{2,60}$/u.test(operator)) {
+    console.error('Name the operator: --operator "<who>"');
+    console.error(USAGE);
+    process.exit(1);
+  }
+  if (!reference || !/^[\p{L}\p{N} ./_#:()-]{3,100}$/u.test(reference)) {
+    console.error('Give the decision reference: --reference <ref>');
+    console.error(USAGE);
+    process.exit(1);
+  }
   const revoke = args.includes('--revoke');
   if (!ajeerCode || !/^\d{3,9}$/.test(ajeerCode)) {
     console.error(USAGE);
     process.exit(1);
   }
-  let uri: string;
-  try {
-    uri = adminTargetUri(target, process.env);
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+  if (!PERMISSIONS.includes(permission as Permission)) {
+    console.error(`Name the permission: --permission ${PERMISSIONS.join('|')}`);
     console.error(USAGE);
     process.exit(1);
   }
-  const name = dbNameOf(uri);
-  console.warn(`  database      : ${name}`);
-  console.warn(`  ${revoke ? 'revoke' : 'grant '}        : VERIFY_SUBA_MOBILE → ${ajeerCode}`);
-  if (option(args, 'confirm') !== name) {
-    console.error(`Nothing written. Add --confirm=${name} to confirm this database.`);
-    process.exit(1);
-  }
-  process.env.MONGODB_URI = uri;
-  resetEnvCache();
-  await connectDb();
+  console.warn(`  ${revoke ? 'revoke' : 'grant '}        : ${permission} → ${ajeerCode}`);
+  await connectConfirmedDb(args, USAGE);
   const result = await setPermission({
     ajeerCode,
-    permission: 'VERIFY_SUBA_MOBILE',
+    permission: permission as Permission,
     grant: !revoke,
-    actor: 'cli',
+    actor: operator,
+    reference,
   });
   if (!result.ok) {
     console.error(
-      `Refused: ${result.reason} (only an active pakistan-level account can be designated).`,
+      `Refused: ${result.reason} (VERIFY_SUBA_MOBILE: an active pakistan account; VERIFY_PAKISTAN_MOBILE: an active pakistan account of the Central IT Department).`,
     );
     await disconnectDb();
     process.exit(1);

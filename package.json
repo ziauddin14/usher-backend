@@ -20,7 +20,9 @@
     "import:employees": "tsx --env-file-if-exists=.env scripts/import-employees.ts",
     "import:villages": "tsx --env-file-if-exists=.env scripts/import-villages.ts",
     "import:mobiles": "tsx --env-file-if-exists=.env scripts/import-mobiles.ts",
-    "designate:verifier": "tsx --env-file-if-exists=.env scripts/designate-verifier.ts"
+    "designate:verifier": "tsx --env-file-if-exists=.env scripts/designate-verifier.ts",
+    "provision:pakistan-admin": "tsx --env-file-if-exists=.env scripts/provision-pakistan-admin.ts",
+    "pakistan-admin:status": "tsx --env-file-if-exists=.env scripts/pakistan-admin-status.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

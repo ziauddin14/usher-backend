@@ -2,6 +2,9 @@ import mongoose, { type InferSchemaType, type Model, Schema } from 'mongoose';
 
 export const ENTRY_TYPES = ['amli', 'rukhsat', 'course', 'qafila', 'mashwara_full'] as const;
 export const JADWAL_STATUS = ['draft', 'submitted'] as const;
+/** Official-duty decision on a full-day mashwara; no decision yet = field absent (pending). */
+export const DUTY_DECISIONS = ['approved', 'rejected'] as const;
+export type DutyDecision = (typeof DUTY_DECISIONS)[number];
 export const VISIT_STEPS = ['donors', 'atiyat', 'ijtima', 'mashwara'] as const;
 
 const money = { type: Number, min: 0, validate: Number.isInteger };
@@ -127,6 +130,24 @@ const jadwalSchema = new Schema(
         { _id: false },
       ),
     ],
+    /**
+     * Official-duty decision on a submitted full-day mashwara (CTO 6 Nov 2026). Absent = not
+     * approved (pending): every record without it — all history included — is Submission only.
+     * Only `approved` makes the day Field Activity. Set by the owner's level directly above
+     * (POST /jadwals/:id/duty-approval, audited); removed when the jadwal is reopened.
+     */
+    dutyApproval: {
+      type: new Schema(
+        {
+          status: { type: String, enum: DUTY_DECISIONS, required: true },
+          by: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+          byAjeerCode: { type: String, required: true },
+          at: { type: Date, required: true },
+          reason: { type: String, maxlength: 300 },
+        },
+        { _id: false },
+      ),
+    },
   },
   { timestamps: true },
 );

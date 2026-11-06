@@ -11,6 +11,7 @@ import {
   listJadwalsQuery,
   mashwaraSchema,
   patchJadwalSchema,
+  dutyApprovalSchema,
   reopenSchema,
   submitSchema,
   visitParams,
@@ -27,6 +28,7 @@ import {
   submitJadwal,
   todayJadwal,
 } from './service.js';
+import { decideDuty } from './duty.js';
 
 export function jadwalsRouter(): Router {
   const router = Router();
@@ -107,6 +109,13 @@ export function jadwalsRouter(): Router {
     const { id } = parse(jadwalIdParams, req.params);
     const { reason } = parse(reopenSchema, req.body);
     res.json({ jadwal: await reopenJadwal(currentUser(req), id, reason) });
+  });
+
+  // Official duty of a full-day mashwara: the owner's level directly above only (duty.ts).
+  router.post('/:id/duty-approval', requireRole(...SUPERVISOR_ROLES), async (req, res) => {
+    const { id } = parse(jadwalIdParams, req.params);
+    const body = parse(dutyApprovalSchema, req.body);
+    res.json({ dutyApproval: await decideDuty(currentUser(req), id, body) });
   });
 
   return router;

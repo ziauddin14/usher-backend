@@ -10,7 +10,13 @@ import { normalizeMobile } from '../../lib/mobile.js';
 import { LEVEL_WORDS, unitKey } from '../../lib/unit-name.js';
 import { headerKey, loadWorkbook, readRows } from '../../lib/xlsx.js';
 import { Unit, type UnitLevel } from '../../models/unit.js';
-import { type Role, User, type Zimmedari } from '../../models/user.js';
+import {
+  isCentrallyManaged,
+  NOT_CENTRALLY_MANAGED,
+  type Role,
+  User,
+  type Zimmedari,
+} from '../../models/user.js';
 import { INITIAL_PASSWORD } from '../auth/schemas.js';
 import { BCRYPT_COST } from '../auth/service.js';
 
@@ -36,30 +42,34 @@ const COLUMN_KEYS = Object.fromEntries(
 /**
  * Zimmedari text → role. English values from the spec; Urdu values seen in the department
  * export. Rows with any other value are rejected and listed in the report (ask the CTO).
+ * No value ever maps to 'pakistan' (CTO 6 Nov 2026): a Pakistan Admin account exists only through
+ * Central IT's controlled provisioning (scripts/provision-pakistan-admin.ts), never through an
+ * import — a matching designation or employee record grants nothing.
  */
-const ZIMMEDARI_MAP: Record<string, { role: Role; zimmedari?: Zimmedari }> = Object.fromEntries(
-  (
-    [
-      ['Ushar', { role: 'zimmedar', zimmedari: 'ushar' }],
-      ['Ushar Zimmedar', { role: 'zimmedar', zimmedari: 'ushar' }],
-      ['Tehsil-Town', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
-      ['Tehsil', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
-      ['Town', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
-      ['Event', { role: 'zimmedar', zimmedari: 'event' }],
-      ['District', { role: 'district' }],
-      ['Division', { role: 'division' }],
-      ['Suba', { role: 'suba' }],
-      ['اسسٹینٹ عشر ذمہ دار', { role: 'zimmedar', zimmedari: 'ushar' }],
-      ['عشر ذمہ دار', { role: 'zimmedar', zimmedari: 'ushar' }],
-      ['ٹاؤن /تحصیل ذمہ دار', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
-      ['ایونٹ عشر ذمہ دار', { role: 'zimmedar', zimmedari: 'event' }],
-      ['ڈسٹرکٹ ذمہ دار', { role: 'district' }],
-      ['سرکاری ڈویژن ذمہ دار', { role: 'division' }],
-      ['ڈویژن عشر ذمہ دار', { role: 'division' }],
-      ['صوبائی ذمہ دار', { role: 'suba' }],
-    ] as const
-  ).map(([text, mapped]) => [headerKey(text), mapped]),
-);
+export const ZIMMEDARI_MAP: Record<string, { role: Role; zimmedari?: Zimmedari }> =
+  Object.fromEntries(
+    (
+      [
+        ['Ushar', { role: 'zimmedar', zimmedari: 'ushar' }],
+        ['Ushar Zimmedar', { role: 'zimmedar', zimmedari: 'ushar' }],
+        ['Tehsil-Town', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
+        ['Tehsil', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
+        ['Town', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
+        ['Event', { role: 'zimmedar', zimmedari: 'event' }],
+        ['District', { role: 'district' }],
+        ['Division', { role: 'division' }],
+        ['Suba', { role: 'suba' }],
+        ['اسسٹینٹ عشر ذمہ دار', { role: 'zimmedar', zimmedari: 'ushar' }],
+        ['عشر ذمہ دار', { role: 'zimmedar', zimmedari: 'ushar' }],
+        ['ٹاؤن /تحصیل ذمہ دار', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
+        ['ایونٹ عشر ذمہ دار', { role: 'zimmedar', zimmedari: 'event' }],
+        ['ڈسٹرکٹ ذمہ دار', { role: 'district' }],
+        ['سرکاری ڈویژن ذمہ دار', { role: 'division' }],
+        ['ڈویژن عشر ذمہ دار', { role: 'division' }],
+        ['صوبائی ذمہ دار', { role: 'suba' }],
+      ] as const
+    ).map(([text, mapped]) => [headerKey(text), mapped]),
+  );
 
 export interface RawRow {
   row: number;
@@ -348,15 +358,26 @@ export async function importEmployees(
   const existing = new Map(
     (
       await User.find({ ajeerCode: { $in: plan.valid.map((r) => r.ajeerCode) } })
-        .select('ajeerCode isDemo mobile')
+        .select('ajeerCode isDemo mobile role department provisioned')
         .lean()
     ).map((u) => [u.ajeerCode, u]),
   );
 
-  // Never turn a demo account (known demo password) into a real person's account.
+  // Never turn a demo account (known demo password) into a real person's account, and never
+  // change a pakistan-level / centrally provisioned account (CTO 6 Nov 2026: only Central IT's
+  // controlled provisioning creates or changes those — an import never creates, promotes or
+  // demotes one, whatever its row says).
   const toImport: ValidRow[] = [];
   for (const row of plan.valid) {
-    if (existing.get(row.ajeerCode)?.isDemo) {
+    const known = existing.get(row.ajeerCode);
+    if (known && isCentrallyManaged(known)) {
+      plan.errors.push({
+        row: row.row,
+        ajeerCode: row.ajeerCode,
+        message:
+          'This Ajeer Code is a centrally provisioned Pakistan Admin account — never changed by an import',
+      });
+    } else if (known?.isDemo) {
       plan.errors.push({
         row: row.row,
         ajeerCode: row.ajeerCode,
@@ -419,7 +440,10 @@ export async function importEmployees(
     await User.bulkWrite(
       assignments.map(({ row, unit }) => ({
         updateOne: {
-          filter: { ajeerCode: row.ajeerCode },
+          // The database itself never matches a centrally managed (Pakistan Admin) account, even one
+          // provisioned after the check above: the upsert then hits the unique ajeer code and the
+          // import stops with an error instead of changing that account.
+          filter: { ajeerCode: row.ajeerCode, ...NOT_CENTRALLY_MANAGED },
           update: {
             $set: {
               name: row.name,
@@ -451,7 +475,11 @@ export async function importEmployees(
       await User.bulkWrite(
         fills.map(({ row }) => ({
           updateOne: {
-            filter: { ajeerCode: row.ajeerCode, mobile: { $exists: false } },
+            filter: {
+              ajeerCode: row.ajeerCode,
+              mobile: { $exists: false },
+              ...NOT_CENTRALLY_MANAGED,
+            },
             update: { $set: { mobile: row.mobile, mobileVerified: true } },
           },
         })),

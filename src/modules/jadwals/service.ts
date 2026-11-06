@@ -1,4 +1,4 @@
-import { type HydratedDocument, Types } from 'mongoose';
+import mongoose, { type HydratedDocument, Types } from 'mongoose';
 import type { z } from 'zod';
 import { audit } from '../../lib/audit.js';
 import type { AuthUser } from '../../lib/auth.js';
@@ -53,6 +53,15 @@ export function serializeJadwal(doc: JadwalDocument) {
     })),
     totals: j.totals ?? null,
     reopened: (j.reopened ?? []).map((r) => ({ by: String(r.by), at: r.at, reason: r.reason })),
+    /** Official-duty decision on a full-day mashwara; null = not decided (not field activity). */
+    dutyApproval: j.dutyApproval
+      ? {
+          status: j.dutyApproval.status,
+          byAjeerCode: j.dutyApproval.byAjeerCode,
+          at: j.dutyApproval.at,
+          reason: j.dutyApproval.reason ?? null,
+        }
+      : null,
   };
 }
 export type JadwalView = ReturnType<typeof serializeJadwal>;
@@ -341,7 +350,21 @@ export async function submitJadwal(
   doc.set('totals', computeDayTotals(doc.toObject(), await categories()));
   doc.status = 'submitted';
   doc.submittedAt = new Date();
-  await doc.save();
+  // One conditional write: it lands only while the jadwal is still a draft (a second submit of the
+  // same draft gets 409 instead of overwriting the first), and the same write removes any official-
+  // duty decision, so a (re-)submitted mashwara is always undecided. A decision made after this
+  // write belongs to this submission and is never touched here.
+  doc.set('dutyApproval', undefined);
+  doc.markModified('dutyApproval');
+  doc.$where = { status: 'draft' };
+  try {
+    await doc.save();
+  } catch (error) {
+    if (error instanceof mongoose.Error.DocumentNotFoundError) {
+      throw new AppError(409, 'JADWAL_LOCKED', 'This jadwal was submitted meanwhile');
+    }
+    throw error;
+  }
   await auditSubmit(user, doc);
   return serializeJadwal(doc);
 }
@@ -353,13 +376,29 @@ export async function reopenJadwal(
   reason: string,
 ): Promise<JadwalView> {
   await connectDb();
-  const doc = await Jadwal.findOne({ _id: id, ...scopeFilter(user) });
-  if (!doc) throw new AppError(404, 'NOT_FOUND', 'Jadwal not found');
-  if (doc.status !== 'submitted')
+  const found = await Jadwal.findOne({ _id: id, ...scopeFilter(user) })
+    .select('status')
+    .lean();
+  if (!found) throw new AppError(404, 'NOT_FOUND', 'Jadwal not found');
+  if (found.status !== 'submitted')
     throw new AppError(409, 'CONFLICT', 'Only a submitted jadwal can be reopened');
-  doc.status = 'draft';
-  doc.reopened.push({ by: userOid(user), at: new Date(), reason });
-  await doc.save();
+  // One atomic write: back to draft and the official-duty decision of a full-day mashwara always
+  // removed — even one written a moment ago — so a re-submitted mashwara must be decided again.
+  // The returned document is the one before the write: it tells which decision was cleared (the
+  // decisions themselves stay in the audit log, MASHWARA_DUTY_*).
+  const before = await Jadwal.findOneAndUpdate(
+    { _id: found._id, status: 'submitted' },
+    {
+      $set: { status: 'draft' },
+      $push: { reopened: { by: userOid(user), at: new Date(), reason } },
+      $unset: { dutyApproval: 1 },
+    },
+    { returnDocument: 'before' },
+  ).lean();
+  if (!before) throw new AppError(409, 'CONFLICT', 'Only a submitted jadwal can be reopened');
+  const clearedDuty = before.dutyApproval?.status ?? null;
+  const doc = await Jadwal.findById(found._id);
+  if (!doc) throw new AppError(404, 'NOT_FOUND', 'Jadwal not found');
   await audit({
     action: 'JADWAL_REOPEN',
     actorId: user.id,
@@ -367,7 +406,12 @@ export async function reopenJadwal(
     targetType: 'jadwal',
     targetId: String(doc._id),
     unitPath: doc.unitPath,
-    details: { date: doc.date, ajeerCode: doc.ajeerCode, reason },
+    details: {
+      date: doc.date,
+      ajeerCode: doc.ajeerCode,
+      reason,
+      ...(clearedDuty ? { clearedDutyApproval: clearedDuty } : {}),
+    },
   });
   return serializeJadwal(doc);
 }

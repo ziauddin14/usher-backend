@@ -15,11 +15,22 @@ export const ROLE_RANK: Record<Role, number> = {
 export const ZIMMEDARI = ['ushar', 'tehsil_town', 'event'] as const;
 
 /**
- * Explicit, designated permissions (CTO 5 Nov 2026) — never implied by the role.
- * VERIFY_SUBA_MOBILE: a pakistan-level account designated to verify suba accounts' self-entered
- * mobiles ("designated Pakistan Admin"). Set only with scripts/designate-verifier.ts (audited).
+ * Explicit, designated permissions (CTO decisions of 5–6 Nov 2026) — never implied by a role or a
+ * department. Set only with scripts/designate-verifier.ts (audited USER_PERMISSION).
+ * - VERIFY_SUBA_MOBILE: a pakistan-level account designated to verify suba accounts' self-entered
+ *   mobiles ("designated Pakistan Admin").
+ * - VERIFY_PAKISTAN_MOBILE: the designated Central IT verifier — a pakistan-level account of the
+ *   Central IT Department — verifies pakistan-level accounts' self-entered mobiles.
  */
-export const PERMISSIONS = ['VERIFY_SUBA_MOBILE'] as const;
+export const PERMISSIONS = ['VERIFY_SUBA_MOBILE', 'VERIFY_PAKISTAN_MOBILE'] as const;
+
+/**
+ * Department of a centrally provisioned account (CTO 6 Nov 2026). Set only by the controlled
+ * provisioning command (scripts/provision-pakistan-admin.ts, audited USER_PROVISION); never by an
+ * import. Membership alone grants nothing.
+ */
+export const DEPARTMENTS = ['CENTRAL_IT'] as const;
+export type Department = (typeof DEPARTMENTS)[number];
 export type Permission = (typeof PERMISSIONS)[number];
 export type Zimmedari = (typeof ZIMMEDARI)[number];
 
@@ -34,7 +45,7 @@ const userSchema = new Schema(
     fatherName: { type: String },
     /** Registered mobile, normalized 03XXXXXXXXX — checked on first login and forgot-password. */
     mobile: { type: String, match: /^03\d{9}$/ },
-    /** false = typed by the user at the first login, waiting for the District to confirm ("tasdeeq baqi"). */
+    /** false = typed by the user at the first login, waiting for its verifier to confirm ("tasdeeq baqi"). */
     mobileVerified: { type: Boolean },
     role: { type: String, enum: ROLES, required: true },
     zimmedari: { type: String, enum: ZIMMEDARI },
@@ -51,6 +62,23 @@ const userSchema = new Schema(
     sessionVersion: { type: Number, default: 0 },
     /** Designated permissions (see PERMISSIONS); empty for almost everybody. */
     permissions: { type: [{ type: String, enum: PERMISSIONS }], default: [] },
+    /** Only on centrally provisioned accounts (see DEPARTMENTS). */
+    department: { type: String, enum: DEPARTMENTS },
+    /**
+     * How a centrally provisioned (pakistan-level) account came to exist: the nomination and its
+     * administrative confirmation (document references), who provisioned it and when.
+     */
+    provisioned: {
+      type: new Schema(
+        {
+          nominationRef: { type: String, required: true },
+          approvalRef: { type: String, required: true },
+          operator: { type: String, required: true },
+          at: { type: Date, required: true },
+        },
+        { _id: false },
+      ),
+    },
     isDemo: { type: Boolean, default: false },
   },
   { timestamps: true },
@@ -59,6 +87,30 @@ const userSchema = new Schema(
 userSchema.index({ unitPath: 1, role: 1 });
 
 export type UserDoc = InferSchemaType<typeof userSchema>;
+
+/**
+ * A pakistan-level or centrally provisioned account (CTO 6 Nov 2026): only Central IT's controlled
+ * process creates or changes it, and only the designated Central IT verifier verifies its mobile.
+ * No import (employees, mobiles) ever touches one.
+ */
+export function isCentrallyManaged(u: {
+  role?: string | null;
+  department?: string | null;
+  provisioned?: unknown;
+}): boolean {
+  return u.role === 'pakistan' || Boolean(u.department) || Boolean(u.provisioned);
+}
+
+/**
+ * Mongo filter for "not centrally managed" — the same rule as isCentrallyManaged. `{ $not: { $ne: null } }`
+ * matches a missing field and a stored null alike, and is never copied into a document an upsert
+ * inserts (a one-element `$in` or `{ field: null }` would be).
+ */
+export const NOT_CENTRALLY_MANAGED = {
+  role: { $ne: 'pakistan' },
+  department: { $not: { $ne: null } },
+  provisioned: { $not: { $ne: null } },
+} as const;
 
 export const User: Model<UserDoc> =
   (mongoose.models.User as Model<UserDoc> | undefined) ??

@@ -17,6 +17,9 @@ export const AUDIT_ACTIONS = [
   'MOBILE_REJECT',
   'MOBILE_VIEW',
   'USER_PERMISSION',
+  'USER_PROVISION',
+  'MASHWARA_DUTY_APPROVE',
+  'MASHWARA_DUTY_REJECT',
   'USER_STATUS',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

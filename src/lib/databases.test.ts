@@ -63,8 +63,12 @@ describe('databases', () => {
     expect(() => adminTargetUri(undefined, demo)).toThrow(/--db demo or --db live/);
     expect(() => adminTargetUri('prod', demo)).toThrow(/--db demo or --db live/);
     // --db demo never writes to a live or unknown database even if MONGODB_URI points there.
-    expect(() => adminTargetUri('demo', { MONGODB_URI: 'mongodb://localhost:27017/ushr_live' })).toThrow(/not one/);
-    expect(() => adminTargetUri('demo', { MONGODB_URI: 'mongodb://localhost:27017/prod' })).toThrow();
+    expect(() =>
+      adminTargetUri('demo', { MONGODB_URI: 'mongodb://localhost:27017/ushr_live' }),
+    ).toThrow(/not one/);
+    expect(() =>
+      adminTargetUri('demo', { MONGODB_URI: 'mongodb://localhost:27017/prod' }),
+    ).toThrow();
     expect(() => adminTargetUri('demo', {})).toThrow();
     expect(() =>
       adminTargetUri('live', { LIVE_MONGODB_URI: 'mongodb://localhost:27017/ushr_demo' }),

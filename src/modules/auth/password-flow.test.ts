@@ -8,6 +8,7 @@ import { PasswordResetRequest } from '../../models/password-reset-request.js';
 import { User } from '../../models/user.js';
 import { seedDemo } from '../../seed/seed.js';
 import { setPermission } from '../users/permissions.js';
+import { provisionPakistanAdmin, setPakistanAdminActive } from '../users/provision.js';
 
 const app = createApp();
 
@@ -462,7 +463,10 @@ describe('mobile verification one level up (CTO 5 Nov 2026)', () => {
       .expect(403);
     // The permission written straight into the database for a suba account (setPermission would
     // refuse it): the role half of the check still refuses.
-    await User.updateOne({ ajeerCode: '9020001' }, { $set: { permissions: ['VERIFY_SUBA_MOBILE'] } });
+    await User.updateOne(
+      { ajeerCode: '9020001' },
+      { $set: { permissions: ['VERIFY_SUBA_MOBILE'] } },
+    );
     await act('9020001', id, 'confirm-mobile').expect(403);
     await act('9020001', id, 'reject-mobile').expect(403);
     await request(app)
@@ -474,7 +478,7 @@ describe('mobile verification one level up (CTO 5 Nov 2026)', () => {
     expect(still.body.error.code).toBe('MOBILE_PENDING');
   });
 
-  it('a pakistan account has no verifier yet — not even the designated admin', async () => {
+  it('a pakistan account: not the designated Pakistan Admin (only the Central IT verifier)', async () => {
     const id = ids['9010099']!;
     await setPermission({
       ajeerCode: '9010001',
@@ -490,6 +494,306 @@ describe('mobile verification one level up (CTO 5 Nov 2026)', () => {
       .expect(403);
     const still = await login({ ajeerCode: '9010099', password: '123', mobile: '03031112233' });
     expect(still.body.error.code).toBe('MOBILE_PENDING');
+  });
+});
+
+describe('Pakistan Admin provisioning and Central IT mobile verification (CTO 6 Nov 2026)', () => {
+  const REFS = {
+    nominationRef: 'NOM/2026/014',
+    approvalRef: 'APR/2026/031',
+    operator: 'Central IT',
+  };
+  const ids: Record<string, string> = {};
+  const cookies: Record<string, string> = {};
+  const act = (who: string, id: string, action: string) =>
+    action === 'pending-mobile'
+      ? request(app).get(`/api/v1/users/${id}/pending-mobile`).set('Cookie', cookies[who]!)
+      : request(app).post(`/api/v1/users/${id}/${action}`).set('Cookie', cookies[who]!);
+  const all3 = async (who: string, id: string, status: number) => {
+    await act(who, id, 'pending-mobile').expect(status);
+    await act(who, id, 'confirm-mobile').expect(status);
+    await act(who, id, 'reject-mobile').expect(status);
+  };
+  /**
+   * Test fixture only: give a provisioned account a usable login without the API. In the real
+   * process the first Central IT verifier's own mobile has no verifier yet (see scope §1 —
+   * open CTO dependency); this stands in for that step on the in-memory test database.
+   */
+  const usable = async (ajeerCode: string, mobile: string) => {
+    await User.updateOne(
+      { ajeerCode },
+      {
+        $set: {
+          mobile,
+          mobileVerified: true,
+          passwordHash: await bcrypt.hash('demo1234', 4),
+          mustChangePassword: false,
+        },
+      },
+    );
+    cookies[ajeerCode] = await loginCookie(app, ajeerCode);
+  };
+  /** A provisioned Pakistan Admin whose self-entered mobile now waits for confirmation. */
+  const pendingAdmin = async (ajeerCode: string, mobile: string) => {
+    const r = await provisionPakistanAdmin({ ajeerCode, name: `Admin ${ajeerCode}`, ...REFS });
+    if (!r.ok) throw new Error(r.reason);
+    ids[ajeerCode] = r.id;
+    const res = await login({ ajeerCode, password: '123', mobile });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('MOBILE_PENDING');
+    expect(res.headers['set-cookie']).toBeUndefined(); // no session before verification
+  };
+
+  beforeAll(async () => {
+    await seedDemo({ reset: true });
+    cookies['9010001'] = await loginCookie(app, '9010001');
+    cookies['9020001'] = await loginCookie(app, '9020001');
+  });
+
+  it('provisioning is controlled: references required, never promotes, nothing implied, audited', async () => {
+    const bad = (over: Partial<Parameters<typeof provisionPakistanAdmin>[0]>) =>
+      provisionPakistanAdmin({ ajeerCode: '9011001', name: 'Central IT One', ...REFS, ...over });
+    expect(await bad({ nominationRef: '' })).toMatchObject({ ok: false, reason: 'INVALID' });
+    expect(await bad({ approvalRef: ' ' })).toMatchObject({ ok: false, reason: 'INVALID' });
+    expect(await bad({ approvalRef: REFS.nominationRef })).toMatchObject({
+      ok: false,
+      reason: 'INVALID',
+    });
+    expect(await bad({ operator: '' })).toMatchObject({ ok: false, reason: 'INVALID' });
+    // An existing account (here a suba) is refused, never promoted.
+    expect(await bad({ ajeerCode: '9020001' })).toMatchObject({ ok: false, reason: 'EXISTS' });
+    expect((await User.findOne({ ajeerCode: '9020001' }).lean())!.role).toBe('suba');
+    expect(await AuditLog.countDocuments({ action: 'USER_PROVISION' })).toBe(0);
+
+    const ok = await bad({ department: 'CENTRAL_IT' });
+    expect(ok).toMatchObject({ ok: true, ajeerCode: '9011001' });
+    const u = await User.findOne({ ajeerCode: '9011001' }).lean();
+    expect(u).toMatchObject({
+      role: 'pakistan',
+      unitCode: 'PK',
+      unitPath: 'PK',
+      department: 'CENTRAL_IT',
+      permissions: [],
+      mustChangePassword: true,
+      isActive: true,
+      isDemo: false,
+      provisioned: { nominationRef: REFS.nominationRef, approvalRef: REFS.approvalRef },
+    });
+    expect(u!.mobile).toBeUndefined(); // creation never verifies (or sets) a mobile
+    expect(u!.mobileVerified).toBeUndefined();
+    const log = await AuditLog.findOne({ action: 'USER_PROVISION' }).lean();
+    expect(log).toMatchObject({
+      actorAjeerCode: 'Central IT',
+      targetType: 'user',
+      targetId: String(u!._id),
+      details: {
+        targetAjeerCode: '9011001',
+        role: 'pakistan',
+        department: 'CENTRAL_IT',
+        nominationRef: REFS.nominationRef,
+        approvalRef: REFS.approvalRef,
+        isActive: true,
+        permissions: [],
+      },
+    });
+    // First login: the typed mobile waits — no session.
+    const first = await login({ ajeerCode: '9011001', password: '123', mobile: '03031230001' });
+    expect(first.body.error.code).toBe('MOBILE_PENDING');
+    expect(first.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('no API creates an account or assigns the pakistan role', async () => {
+    const target = await User.findOne({ ajeerCode: '9040001' }).lean();
+    const id = String(target!._id);
+    const as = cookies['9010001']!;
+    await request(app)
+      .post('/api/v1/users')
+      .set('Cookie', as)
+      .send({ ajeerCode: '9011999', role: 'pakistan' })
+      .expect(404);
+    await request(app)
+      .patch(`/api/v1/users/${id}`)
+      .set('Cookie', as)
+      .send({ role: 'pakistan' })
+      .expect(404);
+    await request(app)
+      .post(`/api/v1/users/${id}/role`)
+      .set('Cookie', as)
+      .send({ role: 'pakistan' })
+      .expect(404);
+    await request(app)
+      .post(`/api/v1/users/${id}/permissions`)
+      .set('Cookie', as)
+      .send({ permission: 'VERIFY_PAKISTAN_MOBILE' })
+      .expect(404);
+    expect((await User.findById(id).lean())!.role).toBe('district');
+    expect(await User.countDocuments({ ajeerCode: '9011999' })).toBe(0);
+  });
+
+  it('VERIFY_PAKISTAN_MOBILE goes only to a Central IT pakistan account', async () => {
+    const grant = (ajeerCode: string) =>
+      setPermission({
+        ajeerCode,
+        permission: 'VERIFY_PAKISTAN_MOBILE',
+        grant: true,
+        actor: 'test',
+      });
+    expect(await grant('9010001')).toEqual({ ok: false, reason: 'WRONG_DEPARTMENT' });
+    expect(await grant('9020001')).toEqual({ ok: false, reason: 'WRONG_ROLE' });
+    expect(await grant('9011001')).toMatchObject({ ok: true, changed: true });
+    expect(
+      await AuditLog.findOne({
+        action: 'USER_PERMISSION',
+        'details.targetAjeerCode': '9011001',
+      }).lean(),
+    ).toMatchObject({ details: { permission: 'VERIFY_PAKISTAN_MOBILE', granted: true } });
+  });
+
+  it('the designated Central IT verifier verifies and rejects a Pakistan Admin mobile; nobody else', async () => {
+    await usable('9011001', '03031230001'); // the designated Central IT verifier (see `usable`)
+    // An ordinary Central IT account without the permission.
+    const plain = await provisionPakistanAdmin({
+      ajeerCode: '9011002',
+      name: 'Central IT Two',
+      ...REFS,
+      department: 'CENTRAL_IT',
+    });
+    expect(plain.ok).toBe(true);
+    await usable('9011002', '03031230002');
+    await pendingAdmin('9011003', '03031230003');
+    const id = ids['9011003']!;
+
+    // Unauthorized: ordinary Pakistan Admin (even holding VERIFY_SUBA_MOBILE), Central IT without
+    // the permission, suba.
+    await setPermission({
+      ajeerCode: '9010001',
+      permission: 'VERIFY_SUBA_MOBILE',
+      grant: true,
+      actor: 'test',
+    });
+    await all3('9010001', id, 403);
+    await all3('9011002', id, 403);
+    await all3('9020001', id, 404); // a pakistan account is outside the suba's scope
+    // The pending list: only the Central IT verifier sees pending pakistan accounts (never itself).
+    const listed = async (who: string) =>
+      (
+        (
+          await request(app)
+            .get('/api/v1/users?mobileStatus=unverified')
+            .set('Cookie', cookies[who]!)
+            .expect(200)
+        ).body.users as { ajeerCode: string }[]
+      ).map((u) => u.ajeerCode);
+    expect(await listed('9011001')).toContain('9011003');
+    expect(await listed('9011001')).not.toContain('9011001');
+    expect(await listed('9010001')).not.toContain('9011003');
+    expect(await listed('9011002')).not.toContain('9011003');
+
+    // Reject: number removed, the person types it again — still no session.
+    await act('9011001', id, 'pending-mobile').expect(200);
+    await act('9011001', id, 'reject-mobile').expect(200);
+    const again = await login({ ajeerCode: '9011003', password: '123', mobile: '03031230033' });
+    expect(again.body.error.code).toBe('MOBILE_PENDING');
+    // Confirm: now the login works (forced password change next).
+    await act('9011001', id, 'confirm-mobile').expect(200);
+    const ok = await login({ ajeerCode: '9011003', password: '123', mobile: '03031230033' }).expect(
+      200,
+    );
+    expect(ok.body.user.mustChangePassword).toBe(true);
+
+    const logs = await AuditLog.find({
+      action: { $in: ['MOBILE_REJECT', 'MOBILE_CONFIRM'] },
+      targetId: id,
+    })
+      .sort({ at: 1 })
+      .lean();
+    expect(
+      logs.map((l) => [
+        l.action,
+        l.actorAjeerCode,
+        (l.details as { targetAjeerCode: string }).targetAjeerCode,
+      ]),
+    ).toEqual([
+      ['MOBILE_REJECT', '9011001', '9011003'],
+      ['MOBILE_CONFIRM', '9011001', '9011003'],
+    ]);
+    for (const l of logs) expect(l.at).toBeInstanceOf(Date);
+  });
+
+  it('never self-verification; a revoke stops the next action in the existing session', async () => {
+    const self = await act(
+      '9011001',
+      ids['9011001'] ?? String((await User.findOne({ ajeerCode: '9011001' }).lean())!._id),
+      'confirm-mobile',
+    ).expect(403);
+    expect(self.body.error.message).toMatch(/own mobile/);
+    await pendingAdmin('9011004', '03031230004');
+    await setPermission({
+      ajeerCode: '9011001',
+      permission: 'VERIFY_PAKISTAN_MOBILE',
+      grant: false,
+      actor: 'test',
+    });
+    await all3('9011001', ids['9011004']!, 403);
+    const still = await login({ ajeerCode: '9011004', password: '123', mobile: '03031230004' });
+    expect(still.body.error.code).toBe('MOBILE_PENDING');
+  });
+
+  it('designations record the operator and the decision reference', async () => {
+    await setPermission({
+      ajeerCode: '9011001',
+      permission: 'VERIFY_PAKISTAN_MOBILE',
+      grant: true,
+      actor: 'Central IT',
+      reference: 'DES/2026/007',
+    });
+    const log = await AuditLog.findOne({
+      action: 'USER_PERMISSION',
+      'details.targetAjeerCode': '9011001',
+      'details.granted': true,
+    })
+      .sort({ at: -1 })
+      .lean();
+    expect(log).toMatchObject({
+      actorAjeerCode: 'Central IT',
+      details: { permission: 'VERIFY_PAKISTAN_MOBILE', reference: 'DES/2026/007' },
+    });
+  });
+
+  it('Central IT activates / deactivates a Pakistan Admin (audited); sessions stop at once', async () => {
+    const status = (ajeerCode: string, isActive: boolean, reference = 'STS/2026/001') =>
+      setPakistanAdminActive({ ajeerCode, isActive, operator: 'Central IT', reference });
+    expect(await status('9020001', false)).toMatchObject({ ok: false, reason: 'NOT_CENTRAL' });
+    expect(await status('9011002', false, '')).toMatchObject({ ok: false, reason: 'INVALID' });
+    expect(await status('9019999', false)).toMatchObject({ ok: false, reason: 'NOT_FOUND' });
+    await request(app).get('/api/v1/auth/me').set('Cookie', cookies['9011002']!).expect(200);
+    expect(await status('9011002', false)).toEqual({ ok: true, changed: true });
+    await request(app).get('/api/v1/auth/me').set('Cookie', cookies['9011002']!).expect(401);
+    expect(await status('9011002', false)).toEqual({ ok: true, changed: false });
+    expect(await status('9011002', true)).toEqual({ ok: true, changed: true });
+    // Re-activation does not revive a session from before the deactivation.
+    await request(app).get('/api/v1/auth/me').set('Cookie', cookies['9011002']!).expect(401);
+    cookies['9011002'] = await loginCookie(app, '9011002');
+    const logs = await AuditLog.find({
+      action: 'USER_STATUS',
+      'details.targetAjeerCode': '9011002',
+    })
+      .sort({ at: 1 })
+      .lean();
+    expect(
+      logs.map((l) => [l.actorAjeerCode, (l.details as { isActive: boolean }).isActive]),
+    ).toEqual([
+      ['Central IT', false],
+      ['Central IT', true],
+    ]);
+    expect(await User.countDocuments({ ajeerCode: '9020001', isActive: true })).toBe(1);
+    // The API cannot do it: no supervisor outranks a pakistan account.
+    const target = await User.findOne({ ajeerCode: '9011002' }).lean();
+    await request(app)
+      .post(`/api/v1/users/${String(target!._id)}/status`)
+      .set('Cookie', cookies['9010001']!)
+      .send({ isActive: false })
+      .expect(403);
   });
 });
 

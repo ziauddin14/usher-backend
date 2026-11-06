@@ -166,8 +166,8 @@ describe('dashboards (B1 / B2)', () => {
       submittedAt: new Date(),
     });
     // Submission: a (amli), c (rukhsat), d (qafila), e (course), f (full-day mashwara) = 5 people.
-    // Field activity: a, d, e = 3 — rukhsat never, full-day mashwara not until it is officially
-    // confirmed as duty. b is a draft (neither). Denominator = 10 active zimmedaran.
+    // Field activity: a, d, e = 3 — rukhsat never, full-day mashwara not until it is approved as
+    // official duty (f is undecided; duty.test.ts covers the approval). b is a draft (neither). Denominator = 10 active zimmedaran.
     const o = (await get('/dash/units/GHOTKI/overview', district).expect(200)).body as {
       tiles: { zimmedaran: number; today: { submitted: number; field: number; jari: number } };
     };
@@ -340,6 +340,7 @@ describe('dashboards (B1 / B2)', () => {
       .rows as Row[];
     expect(rows.map((r) => r.id)).not.toContain(String(z!._id));
     await post(`/users/${String(z!._id)}/status`, district, { isActive: true }).expect(200);
+    await get('/meta', cookie).expect(401); // a session from before the deactivation stays ended
     await loginCookie(app, z!.ajeerCode);
   });
 
@@ -369,7 +370,8 @@ describe('dashboards (B1 / B2)', () => {
     expect(c.ws.rowCount).toBe(2 + 3 + 1);
     const arif = await User.findOne({ ajeerCode: '9090412' }).lean();
     const d = await xlsx(`/dash/export.xlsx?view=days&userId=${String(arif!._id)}&month=2026-10`);
-    expect(d.ws.getRow(d.ws.rowCount).getCell(9).value).toBe(198_000);
+    expect(d.ws.getRow(2).getCell(4).text).toBe('Sarkari duty');
+    expect(d.ws.getRow(d.ws.rowCount).getCell(10).value).toBe(198_000);
     expect(z.res.headers['server-timing']).toMatch(/^app;dur=\d+$/);
   });
 });

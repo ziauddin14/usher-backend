@@ -21,7 +21,10 @@ const TODAY_TEXT: Record<TodayStatus, string> = {
   course: 'Course',
   qafila: 'Qafila',
   mashwara_full: 'Mashwara',
+  mashwara_duty: 'Mashwara (sarkari duty)',
 };
+
+const DUTY_TEXT = { approved: 'Duty manzoor', rejected: 'Duty mustarad' } as const;
 
 type Cell = string | number | null;
 
@@ -66,6 +69,7 @@ export async function dashExport(
         'Tareekh',
         'Status',
         'Qism',
+        'Sarkari duty',
         'Gaon',
         'Naye donors',
         'Purane',
@@ -81,6 +85,12 @@ export async function dashExport(
           x.date,
           x.status === 'submitted' ? 'Jama' : 'Jari hai',
           x.entryType,
+          // Same rule as the screen and print: only a submitted full-day mashwara has a duty state.
+          x.entryType === 'mashwara_full' && x.status === 'submitted'
+            ? x.dutyApproval
+              ? DUTY_TEXT[x.dutyApproval]
+              : 'Duty faisla baqi'
+            : '',
           x.villages.join(', '),
           t.newDonors ?? null,
           t.oldDonors ?? null,
@@ -94,6 +104,7 @@ export async function dashExport(
       [
         'Kul',
         `${submitted.length} din`,
+        '',
         '',
         '',
         kpi('newDonors'),

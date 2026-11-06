@@ -19,13 +19,20 @@ import type { DashPeriod } from './schemas.js';
 const LEVEL_ORDER: UnitLevel[] = ['pakistan', 'suba', 'division', 'district'];
 
 /** Submitted today (any entry type). */
-const SUBMITTED = new Set<TodayStatus>(['jama', 'rukhsat', 'course', 'qafila', 'mashwara_full']);
+const SUBMITTED = new Set<TodayStatus>([
+  'jama',
+  'rukhsat',
+  'course',
+  'qafila',
+  'mashwara_full',
+  'mashwara_duty',
+]);
 /**
- * Submitted today as field activity (CTO 5 Nov 2026): amli, qafila, course. Never rukhsat. Full-day
- * mashwara is submission only: it may count as field activity only once it is officially confirmed
- * as duty, and Demo v1 has no such confirmation yet (requirement documented, no flag invented).
+ * Submitted today as field activity (CTO 5–6 Nov 2026): amli, qafila, course, and a full-day
+ * mashwara only once its level directly above approved it as official duty ('mashwara_duty').
+ * Never rukhsat; an undecided or rejected mashwara ('mashwara_full') is submission only.
  */
-const FIELD = new Set<TodayStatus>(['jama', 'course', 'qafila']);
+const FIELD = new Set<TodayStatus>(['jama', 'course', 'qafila', 'mashwara_duty']);
 
 /** Whole percent of n out of `of`, rounded down and kept within 0–100. */
 export function percent(n: number, of: number): number {
@@ -33,8 +40,29 @@ export function percent(n: number, of: number): number {
   return Math.min(100, Math.max(0, Math.floor((n * 100) / of)));
 }
 
+/**
+ * One zimmedar's day: jama = submitted amli · jari = draft · nahi = no record · the other entry
+ * types as submitted · mashwara_full = full-day mashwara not (yet) approved as official duty ·
+ * mashwara_duty = full-day mashwara approved as official duty.
+ */
 export type TodayStatus =
-  'jama' | 'jari' | 'nahi' | 'rukhsat' | 'course' | 'qafila' | 'mashwara_full';
+  'jama' | 'jari' | 'nahi' | 'rukhsat' | 'course' | 'qafila' | 'mashwara_full' | 'mashwara_duty';
+
+/** The one place a jadwal becomes a TodayStatus (dashboard, Excel and print all use it). */
+export function todayStatusOf(
+  j:
+    | { status: string; entryType: string; dutyApproval?: { status?: string | null } | null }
+    | null
+    | undefined,
+): TodayStatus {
+  if (!j) return 'nahi';
+  if (j.status === 'draft') return 'jari';
+  if (j.entryType === 'amli') return 'jama';
+  if (j.entryType === 'mashwara_full') {
+    return j.dutyApproval?.status === 'approved' ? 'mashwara_duty' : 'mashwara_full';
+  }
+  return j.entryType as TodayStatus;
+}
 
 /** Reward status pill (scope §5 B1): a tier reached, "qareeb", or "peeche". */
 export type RewardPill =
@@ -144,7 +172,7 @@ async function zimmedarRows(path: string, period: DashPeriod, date: string) {
       { $group: { _id: '$userId', days: { $sum: 1 }, ...sums } },
     ]),
     Jadwal.find({ userId: { $in: ids }, date: today })
-      .select('userId status entryType')
+      .select('userId status entryType dutyApproval.status')
       .lean(),
     Jadwal.aggregate<{ _id: { u: Types.ObjectId; m: string }; amount: number }>([
       { $match: { userId: { $in: ids }, status: 'submitted', month: { $in: reward.months } } },
@@ -169,13 +197,7 @@ async function zimmedarRows(path: string, period: DashPeriod, date: string) {
     const id = String(u._id);
     const r = rangeBy.get(id);
     const t = todayBy.get(id);
-    const todayStatus: TodayStatus = !t
-      ? 'nahi'
-      : t.status === 'draft'
-        ? 'jari'
-        : t.entryType === 'amli'
-          ? 'jama'
-          : t.entryType;
+    const todayStatus = todayStatusOf(t);
     const status = rewardStatus(monthsBy.get(id) ?? [], rules, today);
     return {
       id,
@@ -215,8 +237,9 @@ function tilesOf(rows: ZimmedarRow[], rules: RewardRules) {
        */
       submitted: rows.filter((r) => SUBMITTED.has(r.today)).length,
       /**
-       * Field Activity % numerator: submitted amli, qafila or course — never rukhsat, and
-       * full-day mashwara only after official duty confirmation (not available yet).
+       * Field Activity % numerator: submitted amli, qafila, course, or a full-day mashwara
+       * approved as official duty ('mashwara_duty') — never rukhsat, never an undecided or
+       * rejected mashwara.
        * Drafts ("jari") and no record count in neither.
        */
       field: rows.filter((r) => FIELD.has(r.today)).length,
@@ -334,7 +357,7 @@ export async function zimmedarDays(caller: AuthUser, userId: string, month?: str
   const user = await zimmedarInScope(caller, userId);
   const m = month ?? karachiDate().slice(0, 7);
   const days = await Jadwal.find({ userId: user._id, month: m })
-    .select('date status entryType totals visits.villageName reopened')
+    .select('date status entryType totals visits.villageName reopened dutyApproval.status')
     .sort({ date: 1 })
     .lean();
   return {
@@ -357,6 +380,8 @@ export async function zimmedarDays(caller: AuthUser, userId: string, month?: str
       villages: d.visits.map((v) => v.villageName),
       totals: d.status === 'submitted' ? (d.totals ?? null) : null,
       reopened: (d.reopened ?? []).length,
+      /** Full-day mashwara only: 'approved' | 'rejected' | null (not decided). */
+      dutyApproval: d.entryType === 'mashwara_full' ? (d.dutyApproval?.status ?? null) : null,
     })),
   };
 }

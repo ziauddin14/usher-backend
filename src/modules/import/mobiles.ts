@@ -6,7 +6,7 @@ import { normalizeAjeerCode } from '../../lib/ajeer-code.js';
 import { connectDb } from '../../lib/db.js';
 import { normalizeMobile } from '../../lib/mobile.js';
 import { headerKey, loadWorkbook, readRows, type SheetRow } from '../../lib/xlsx.js';
-import { User } from '../../models/user.js';
+import { isCentrallyManaged, NOT_CENTRALLY_MANAGED, User } from '../../models/user.js';
 
 const COLUMNS = {
   ajeerCode: ['Ajeer Code', 'Ajeer', 'Code', 'ID', 'عملہ کوڈ', 'اجیر کوڈ', 'کوڈ'],
@@ -87,7 +87,7 @@ export async function importMobiles(
   for (const code of twice) byCode.delete(code);
 
   const users = await User.find({ ajeerCode: { $in: [...byCode.keys()] }, isDemo: false })
-    .select('ajeerCode mobile')
+    .select('ajeerCode mobile role department provisioned')
     .lean();
   const userByCode = new Map(users.map((u) => [u.ajeerCode, u]));
 
@@ -98,6 +98,15 @@ export async function importMobiles(
     const user = userByCode.get(ajeerCode);
     if (!user) {
       problems.push({ row, ajeerCode, mobile, message: 'No imported user with this Ajeer Code' });
+    } else if (isCentrallyManaged(user)) {
+      // CTO 6 Nov 2026: a Pakistan Admin's mobile is typed at the first login and verified only
+      // by the designated Central IT verifier — never filled or verified by an import.
+      problems.push({
+        row,
+        ajeerCode,
+        message:
+          'Centrally provisioned Pakistan Admin account — its mobile is verified only by the Central IT verifier',
+      });
     } else if (!user.mobile) {
       set.push({ ajeerCode, mobile });
     } else if (user.mobile === mobile) {
@@ -112,7 +121,7 @@ export async function importMobiles(
       set.map(({ ajeerCode, mobile }) => ({
         updateOne: {
           // Only while still empty, so a number typed meanwhile is never replaced.
-          filter: { ajeerCode, mobile: { $exists: false } },
+          filter: { ajeerCode, mobile: { $exists: false }, ...NOT_CENTRALLY_MANAGED },
           update: { $set: { mobile, mobileVerified: true } },
         },
       })),
@@ -120,7 +129,11 @@ export async function importMobiles(
   }
 
   const setCodes = new Set(set.map((s) => s.ajeerCode));
-  const missing = await User.find({ isDemo: false, mobile: { $exists: false } })
+  const missing = await User.find({
+    isDemo: false,
+    mobile: { $exists: false },
+    ...NOT_CENTRALLY_MANAGED,
+  })
     .select('ajeerCode name unitCode')
     .sort({ unitCode: 1, ajeerCode: 1 })
     .lean();

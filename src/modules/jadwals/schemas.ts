@@ -109,3 +109,9 @@ export const submitSchema = z.object({
 });
 
 export const reopenSchema = z.object({ reason: z.string().trim().min(5).max(300) });
+
+/** POST /jadwals/:id/duty-approval — official-duty decision on a full-day mashwara. */
+export const dutyApprovalSchema = z.object({
+  decision: z.enum(['approve', 'reject']),
+  reason: z.string().trim().max(300).optional(),
+});
