@@ -32,7 +32,15 @@ export async function publicUser(user: AuthUser): Promise<PublicUser> {
   const unit = await Unit.findOne({ code: user.unitCode })
     .select('code name nameUr path level')
     .lean();
-  if (!unit) throw new AppError(500, 'INTERNAL', 'User unit missing');
+  // A user whose unit is missing is a data error (seed / import). Fail loudly and never guess a
+  // level: guessing "district" would show a Division or Suba user the wrong screens (CTO, 6 Nov).
+  // Logged: ids and codes only — no names, mobiles or tokens.
+  if (!unit) {
+    console.error(
+      `[auth] unit missing for user ${user.id} (role ${user.role}, unitCode ${user.unitCode}, unitPath ${user.unitPath})`,
+    );
+    throw new AppError(500, 'INTERNAL', 'User unit missing');
+  }
   return {
     id: user.id,
     ajeerCode: user.ajeerCode,
