@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  adminTargetUri,
   assertDemoDb,
   dbNameOf,
   isLiveDb,
@@ -53,5 +54,20 @@ describe('databases', () => {
     expect(seedRefusal('mongodb://localhost:27017/ushr_prod', false, undefined)).toMatch(
       /only ushr_demo/,
     );
+  });
+
+  it('an admin CLI writes only to the database the operator names', () => {
+    const demo = { MONGODB_URI: 'mongodb://localhost:27017/ushr_demo' };
+    expect(adminTargetUri('demo', demo)).toBe('mongodb://localhost:27017/ushr_demo');
+    expect(adminTargetUri('live', demo)).toBe('mongodb://localhost:27017/ushr_live');
+    expect(() => adminTargetUri(undefined, demo)).toThrow(/--db demo or --db live/);
+    expect(() => adminTargetUri('prod', demo)).toThrow(/--db demo or --db live/);
+    // --db demo never writes to a live or unknown database even if MONGODB_URI points there.
+    expect(() => adminTargetUri('demo', { MONGODB_URI: 'mongodb://localhost:27017/ushr_live' })).toThrow(/not one/);
+    expect(() => adminTargetUri('demo', { MONGODB_URI: 'mongodb://localhost:27017/prod' })).toThrow();
+    expect(() => adminTargetUri('demo', {})).toThrow();
+    expect(() =>
+      adminTargetUri('live', { LIVE_MONGODB_URI: 'mongodb://localhost:27017/ushr_demo' }),
+    ).toThrow(/live database/);
   });
 });

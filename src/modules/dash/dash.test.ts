@@ -10,6 +10,7 @@ import { User } from '../../models/user.js';
 import { Village } from '../../models/village.js';
 import { seedHistory } from '../../seed/history.js';
 import { seedDemo } from '../../seed/seed.js';
+import { percent } from './service.js';
 
 const app = createApp();
 const TODAY = '2026-11-01';
@@ -141,20 +142,62 @@ describe('dashboards (B1 / B2)', () => {
     expect(by.get(b!.ajeerCode)).toBe('jari');
     expect(by.get(c!.ajeerCode)).toBe('rukhsat');
     expect(rows.filter((r) => r.today === 'nahi')).toHaveLength(4);
-    // Submission % numerator: a (amli), c (rukhsat), d, e, f = 5 · Field Activity: a, d, e, f = 4.
-    // b is a draft (neither); denominator = 10 active zimmedaran.
+    // Records that must not count: an inactive zimmedar's submitted day (not in the population)
+    // and the many earlier submitted days of the others (only today's record counts, once per
+    // person — e.g. g has seeded history but nothing today).
+    const [g] = ghotki.slice(-1);
+    expect(
+      await Jadwal.countDocuments({ userId: g!._id, status: 'submitted', date: { $ne: TODAY } }),
+    ).toBeGreaterThan(50);
+    expect(await Jadwal.countDocuments({ userId: g!._id, date: TODAY })).toBe(0);
+    const inactive = await User.create({
+      ajeerCode: '9000999',
+      name: 'Inactive Zimmedar',
+      role: 'zimmedar',
+      unitCode: 'GHOTKI',
+      unitPath: a!.unitPath,
+      passwordHash: 'x',
+      isActive: false,
+    });
+    await Jadwal.create({
+      ...base(inactive),
+      entryType: 'amli',
+      status: 'submitted',
+      submittedAt: new Date(),
+    });
+    // Submission: a (amli), c (rukhsat), d (qafila), e (course), f (full-day mashwara) = 5 people.
+    // Field activity: a, d, e = 3 — rukhsat never, full-day mashwara not until it is officially
+    // confirmed as duty. b is a draft (neither). Denominator = 10 active zimmedaran.
     const o = (await get('/dash/units/GHOTKI/overview', district).expect(200)).body as {
       tiles: { zimmedaran: number; today: { submitted: number; field: number; jari: number } };
     };
     expect(o.tiles.zimmedaran).toBe(10);
-    expect(o.tiles.today).toMatchObject({ submitted: 5, field: 4, jari: 1 });
+    expect(o.tiles.today).toMatchObject({
+      submitted: 5,
+      field: 3,
+      jari: 1,
+      submittedPct: 50,
+      fieldPct: 30,
+    });
     const kids = (await get('/dash/units/SUKKUR/children', division).expect(200)).body as {
       rows: { unit: { code: string }; today: { submitted: number; field: number } }[];
     };
     expect(kids.rows.find((r) => r.unit.code === 'GHOTKI')!.today).toMatchObject({
       submitted: 5,
-      field: 4,
+      field: 3,
     });
+    for (const r of kids.rows as unknown as {
+      zimmedaran: number;
+      today: { submitted: number; field: number; submittedPct: number; fieldPct: number };
+    }[]) {
+      expect(r.today.field).toBeLessThanOrEqual(r.today.submitted);
+      expect(r.today.submitted).toBeLessThanOrEqual(r.zimmedaran);
+      expect(r.today.submittedPct).toBeLessThanOrEqual(100);
+      expect(r.today.fieldPct).toBeLessThanOrEqual(r.today.submittedPct);
+    }
+    // Test fixture only (in-memory test database): keep the later tests' zimmedar lists as seeded.
+    await Jadwal.deleteMany({ userId: inactive._id });
+    await User.deleteOne({ _id: inactive._id });
   });
 
   it('B2: division children are its districts; pakistan children are the subas', async () => {
@@ -328,5 +371,17 @@ describe('dashboards (B1 / B2)', () => {
     const d = await xlsx(`/dash/export.xlsx?view=days&userId=${String(arif!._id)}&month=2026-10`);
     expect(d.ws.getRow(d.ws.rowCount).getCell(9).value).toBe(198_000);
     expect(z.res.headers['server-timing']).toMatch(/^app;dur=\d+$/);
+  });
+});
+
+describe('percent (shared by both measures)', () => {
+  it('is whole, rounded down, and always within 0–100', () => {
+    expect(percent(1, 3)).toBe(33);
+    expect(percent(2, 3)).toBe(66); // never rounded up
+    expect(percent(5, 10)).toBe(50);
+    expect(percent(10, 10)).toBe(100);
+    expect(percent(11, 10)).toBe(100);
+    expect(percent(-1, 10)).toBe(0);
+    expect(percent(3, 0)).toBe(0);
   });
 });

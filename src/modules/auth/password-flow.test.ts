@@ -7,6 +7,7 @@ import { AuditLog } from '../../models/audit-log.js';
 import { PasswordResetRequest } from '../../models/password-reset-request.js';
 import { User } from '../../models/user.js';
 import { seedDemo } from '../../seed/seed.js';
+import { setPermission } from '../users/permissions.js';
 
 const app = createApp();
 
@@ -328,10 +329,30 @@ describe('mobile verification one level up (CTO 5 Nov 2026)', () => {
     expect(ok.body.user.mustChangePassword).toBe(true);
   });
 
-  it('a division account by its suba; a suba account by pakistan', async () => {
+  it('a division account by its suba; a suba account only by the designated Pakistan Admin', async () => {
     await act('9030001', ids['9030099']!, 'confirm-mobile').expect(403);
     await act('9020001', ids['9030099']!, 'confirm-mobile').expect(200);
     await act('9020001', ids['9020099']!, 'reject-mobile').expect(403);
+    // The pakistan role alone is not enough.
+    await act('9010001', ids['9020099']!, 'reject-mobile').expect(403);
+    await request(app)
+      .get(`/api/v1/users/${ids['9020099']!}/pending-mobile`)
+      .set('Cookie', cookies['9010001']!)
+      .expect(403);
+    // Designated explicitly (audited); the same session gets it on its next request.
+    expect(
+      await setPermission({
+        ajeerCode: '9010001',
+        permission: 'VERIFY_SUBA_MOBILE',
+        grant: true,
+        actor: 'test',
+      }),
+    ).toMatchObject({ ok: true, changed: true });
+    const me = await request(app)
+      .get('/api/v1/auth/me')
+      .set('Cookie', cookies['9010001']!)
+      .expect(200);
+    expect(me.body.user.permissions).toEqual(['VERIFY_SUBA_MOBILE']);
     await act('9010001', ids['9020099']!, 'reject-mobile').expect(200);
     const confirms = await AuditLog.find({
       action: { $in: ['MOBILE_CONFIRM', 'MOBILE_REJECT'] },
@@ -351,9 +372,118 @@ describe('mobile verification one level up (CTO 5 Nov 2026)', () => {
     );
   });
 
-  it('a pakistan account has no verifier yet (no self- or same-level verification)', async () => {
-    const id = ids['9010099']!;
+  it('the designated admin verifies suba accounts only, not lower levels', async () => {
+    const passwordHash = await bcrypt.hash('123', 4);
+    const div = await User.create({
+      ajeerCode: '9030098',
+      role: 'division',
+      unitCode: 'SUKKUR',
+      unitPath: 'PK/INT_SINDH/SUKKUR',
+      name: 'Test division 2',
+      passwordHash,
+      mustChangePassword: true,
+    });
+    await login({ ajeerCode: '9030098', password: '123', mobile: '03031114455' }).expect(403);
+    await act('9010001', String(div._id), 'confirm-mobile').expect(403); // two levels up
+    await act('9020001', String(div._id), 'confirm-mobile').expect(200);
+  });
+
+  it('a permission is given only to an active pakistan account, explicitly and audited', async () => {
+    expect(
+      await setPermission({
+        ajeerCode: '9020001',
+        permission: 'VERIFY_SUBA_MOBILE',
+        grant: true,
+        actor: 'test',
+      }),
+    ).toEqual({ ok: false, reason: 'WRONG_ROLE' });
+    expect(
+      await setPermission({
+        ajeerCode: '9999999',
+        permission: 'VERIFY_SUBA_MOBILE',
+        grant: true,
+        actor: 'test',
+      }),
+    ).toEqual({ ok: false, reason: 'NOT_FOUND' });
+    await User.updateOne({ ajeerCode: '9010099' }, { $set: { isActive: false } });
+    expect(
+      await setPermission({
+        ajeerCode: '9010099',
+        permission: 'VERIFY_SUBA_MOBILE',
+        grant: true,
+        actor: 'test',
+      }),
+    ).toEqual({ ok: false, reason: 'INACTIVE' });
+    await User.updateOne({ ajeerCode: '9010099' }, { $set: { isActive: true } });
+    // Again on the designated admin: no change, no second audit entry.
+    expect(
+      await setPermission({
+        ajeerCode: '9010001',
+        permission: 'VERIFY_SUBA_MOBILE',
+        grant: true,
+        actor: 'test',
+      }),
+    ).toMatchObject({ ok: true, changed: false });
+    expect(await AuditLog.countDocuments({ action: 'USER_PERMISSION' })).toBe(1);
+    // Revoke → the next request has no permission any more.
+    await setPermission({
+      ajeerCode: '9010001',
+      permission: 'VERIFY_SUBA_MOBILE',
+      grant: false,
+      actor: 'test',
+    });
+    const me = await request(app)
+      .get('/api/v1/auth/me')
+      .set('Cookie', cookies['9010001']!)
+      .expect(200);
+    expect(me.body.user.permissions).toEqual([]);
+    expect(await AuditLog.countDocuments({ action: 'USER_PERMISSION' })).toBe(2);
+  });
+
+  it('a revoked admin and a non-pakistan holder of the permission are both refused', async () => {
+    const passwordHash = await bcrypt.hash('123', 4);
+    const suba = await User.create({
+      ajeerCode: '9020098',
+      role: 'suba',
+      unitCode: 'INT_SINDH',
+      unitPath: 'PK/INT_SINDH',
+      name: 'Test suba 2',
+      passwordHash,
+      mustChangePassword: true,
+    });
+    const id = String(suba._id);
+    await login({ ajeerCode: '9020098', password: '123', mobile: '03031116677' }).expect(403);
+    // The revoked admin's existing session: every verification endpoint refuses.
     await act('9010001', id, 'confirm-mobile').expect(403);
+    await act('9010001', id, 'reject-mobile').expect(403);
+    await request(app)
+      .get(`/api/v1/users/${id}/pending-mobile`)
+      .set('Cookie', cookies['9010001']!)
+      .expect(403);
+    // The permission written straight into the database for a suba account (setPermission would
+    // refuse it): the role half of the check still refuses.
+    await User.updateOne({ ajeerCode: '9020001' }, { $set: { permissions: ['VERIFY_SUBA_MOBILE'] } });
+    await act('9020001', id, 'confirm-mobile').expect(403);
+    await act('9020001', id, 'reject-mobile').expect(403);
+    await request(app)
+      .get(`/api/v1/users/${id}/pending-mobile`)
+      .set('Cookie', cookies['9020001']!)
+      .expect(403);
+    await User.updateOne({ ajeerCode: '9020001' }, { $set: { permissions: [] } });
+    const still = await login({ ajeerCode: '9020098', password: '123', mobile: '03031116677' });
+    expect(still.body.error.code).toBe('MOBILE_PENDING');
+  });
+
+  it('a pakistan account has no verifier yet — not even the designated admin', async () => {
+    const id = ids['9010099']!;
+    await setPermission({
+      ajeerCode: '9010001',
+      permission: 'VERIFY_SUBA_MOBILE',
+      grant: true,
+      actor: 'test',
+    });
+    await act('9010001', id, 'confirm-mobile').expect(403);
+    await act('9010001', id, 'reject-mobile').expect(403);
     await request(app)
       .get(`/api/v1/users/${id}/pending-mobile`)
       .set('Cookie', cookies['9010001']!)

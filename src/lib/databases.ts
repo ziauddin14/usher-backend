@@ -47,6 +47,26 @@ export function assertDemoDb(uri: string): void {
 }
 
 /**
+ * Database for an admin CLI that changes one account (e.g. `designate:verifier`): the operator
+ * names the target explicitly — `demo` = MONGODB_URI, only a demo/test database; `live` = the live
+ * database (same rule as the imports). Throws for anything else, so the shell's MONGODB_URI can
+ * never be written to by accident.
+ */
+export function adminTargetUri(target: string | undefined, env: NodeJS.ProcessEnv): string {
+  if (target === 'live') return liveDbUri(env);
+  if (target === 'demo') {
+    const uri = env.MONGODB_URI ?? '';
+    if (!isDemoDb(uri)) {
+      throw new Error(
+        `--db demo needs MONGODB_URI on a demo database; "${dbNameOf(uri) || '(none)'}" is not one.`,
+      );
+    }
+    return uri;
+  }
+  throw new Error('Name the database: --db demo or --db live');
+}
+
+/**
  * Why `pnpm seed` must not run (null = it may). Never on a live database; `--reset` wipes data, so
  * it always needs SEED_CONFIRM set to the database name (local or Atlas alike).
  */

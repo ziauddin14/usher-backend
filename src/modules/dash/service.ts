@@ -20,8 +20,18 @@ const LEVEL_ORDER: UnitLevel[] = ['pakistan', 'suba', 'division', 'district'];
 
 /** Submitted today (any entry type). */
 const SUBMITTED = new Set<TodayStatus>(['jama', 'rukhsat', 'course', 'qafila', 'mashwara_full']);
-/** Submitted today as field activity (CTO 5 Nov 2026): everything submitted except rukhsat. */
-const FIELD = new Set<TodayStatus>(['jama', 'course', 'qafila', 'mashwara_full']);
+/**
+ * Submitted today as field activity (CTO 5 Nov 2026): amli, qafila, course. Never rukhsat. Full-day
+ * mashwara is submission only: it may count as field activity only once it is officially confirmed
+ * as duty, and Demo v1 has no such confirmation yet (requirement documented, no flag invented).
+ */
+const FIELD = new Set<TodayStatus>(['jama', 'course', 'qafila']);
+
+/** Whole percent of n out of `of`, rounded down and kept within 0–100. */
+export function percent(n: number, of: number): number {
+  if (of <= 0) return 0;
+  return Math.min(100, Math.max(0, Math.floor((n * 100) / of)));
+}
 
 export type TodayStatus =
   'jama' | 'jari' | 'nahi' | 'rukhsat' | 'course' | 'qafila' | 'mashwara_full';
@@ -116,6 +126,8 @@ async function zimmedarRows(path: string, period: DashPeriod, date: string) {
   const day = date > today ? today : date;
   const { from, to } = periodRange(period, day, today, settings.weekStartsOn, rules);
 
+  // One row per unique active zimmedar of the unit: this is the denominator of both percentages,
+  // and every count below is per person (a jadwal of an inactive or moved user is not counted).
   const users = await User.find({ role: 'zimmedar', isActive: true, unitPath: pathRegex(path) })
     .select('ajeerCode ajeerCodeFull name nameUr zimmedari unitCode unitPath')
     .sort({ unitPath: 1, name: 1 })
@@ -203,10 +215,15 @@ function tilesOf(rows: ZimmedarRow[], rules: RewardRules) {
        */
       submitted: rows.filter((r) => SUBMITTED.has(r.today)).length,
       /**
-       * Field Activity % numerator: submitted amli, qafila, course or full-day mashwara —
-       * never rukhsat (CTO 5 Nov 2026). Drafts ("jari") and no record count in neither.
+       * Field Activity % numerator: submitted amli, qafila or course — never rukhsat, and
+       * full-day mashwara only after official duty confirmation (not available yet).
+       * Drafts ("jari") and no record count in neither.
        */
       field: rows.filter((r) => FIELD.has(r.today)).length,
+      /** submitted ÷ zimmedaran (rows are unique active zimmedaran), 0–100, rounded down. */
+      submittedPct: percent(rows.filter((r) => SUBMITTED.has(r.today)).length, rows.length),
+      /** field ÷ zimmedaran, 0–100, rounded down. */
+      fieldPct: percent(rows.filter((r) => FIELD.has(r.today)).length, rows.length),
     },
     /** Submitted jadwal days in the period (all zimmedaran together). */
     recordDays: rows.reduce((s, r) => s + r.recordDays, 0),

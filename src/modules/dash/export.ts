@@ -5,7 +5,13 @@ import type { AuthUser } from '../../lib/auth.js';
 import { AppError } from '../../lib/errors.js';
 import type { Kpis } from '../me/service.js';
 import type { DashPeriod } from './schemas.js';
-import { childrenTable, type TodayStatus, zimmedarDays, zimmedaranTable } from './service.js';
+import {
+  childrenTable,
+  percent,
+  type TodayStatus,
+  zimmedarDays,
+  zimmedaranTable,
+} from './service.js';
 
 const TODAY_TEXT: Record<TodayStatus, string> = {
   jama: 'Jama',
@@ -164,8 +170,8 @@ export async function dashExport(
     [
       'Unit',
       'Zimmedaran',
-      'Jadwal jama (aaj)',
-      'Field activity (aaj)',
+      'Jadwal jama % (aaj)',
+      'Field activity % (aaj)',
       'Gaon visits',
       'Naye donors',
       'Wusooli (kul)',
@@ -175,8 +181,8 @@ export async function dashExport(
     c.rows.map((r) => [
       r.unit.name,
       r.zimmedaran,
-      r.today.submitted,
-      r.today.field,
+      r.today.submittedPct,
+      r.today.fieldPct,
       r.kpis.villages,
       r.kpis.newDonors,
       r.kpis.wusooli,
@@ -186,8 +192,14 @@ export async function dashExport(
     [
       'Kul',
       c.rows.reduce((s, r) => s + r.zimmedaran, 0),
-      c.rows.reduce((s, r) => s + r.today.submitted, 0),
-      c.rows.reduce((s, r) => s + r.today.field, 0),
+      percent(
+        c.rows.reduce((s, r) => s + r.today.submitted, 0),
+        c.rows.reduce((s, r) => s + r.zimmedaran, 0),
+      ),
+      percent(
+        c.rows.reduce((s, r) => s + r.today.field, 0),
+        c.rows.reduce((s, r) => s + r.zimmedaran, 0),
+      ),
       sum(c.rows, 'villages'),
       sum(c.rows, 'newDonors'),
       sum(c.rows, 'wusooli'),

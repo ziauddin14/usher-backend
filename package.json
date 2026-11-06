@@ -19,7 +19,8 @@
     "backup": "tsx --env-file-if-exists=.env scripts/backup.ts",
     "import:employees": "tsx --env-file-if-exists=.env scripts/import-employees.ts",
     "import:villages": "tsx --env-file-if-exists=.env scripts/import-villages.ts",
-    "import:mobiles": "tsx --env-file-if-exists=.env scripts/import-mobiles.ts"
+    "import:mobiles": "tsx --env-file-if-exists=.env scripts/import-mobiles.ts",
+    "designate:verifier": "tsx --env-file-if-exists=.env scripts/designate-verifier.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

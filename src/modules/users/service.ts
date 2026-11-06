@@ -120,13 +120,32 @@ export async function resetPassword(caller: AuthUser, userId: string): Promise<v
 }
 
 /**
- * Self-entered mobiles are verified one level up (CTO 5 Nov 2026): zimmedar ← District,
- * district ← Division, division ← Suba, suba ← Pakistan. Only that level sees the full number,
- * confirms or rejects; every other level sees the status (masked) read-only. Nobody verifies
- * their own or a same-level account. A pakistan-level account has no level above it in the
- * data model (the "designated central authority" is not defined yet), so nobody can verify it.
+ * Who verifies a self-entered mobile (CTO 5 Nov 2026), enforced here for the full number,
+ * confirm and reject:
+ *   zimmedar ← District · district ← Division · division ← Suba ·
+ *   suba ← a pakistan account with the designated permission VERIFY_SUBA_MOBILE only (the role
+ *   alone is not enough) · pakistan ← nobody yet: the "designated central authority" is not
+ *   defined, so such an account stays pending (documented operational restriction).
+ * Never self- or same-level, never a higher level that is not the designated one.
  */
 function assertVerifierOf(caller: AuthUser, target: { role: Role }): void {
+  if (target.role === 'pakistan') {
+    throw new AppError(
+      403,
+      'FORBIDDEN',
+      'No verification authority is designated for pakistan-level accounts yet',
+    );
+  }
+  if (target.role === 'suba') {
+    if (caller.role !== 'pakistan' || !caller.permissions?.includes('VERIFY_SUBA_MOBILE')) {
+      throw new AppError(
+        403,
+        'FORBIDDEN',
+        'Only the designated Pakistan Admin verifies a suba account’s mobile number',
+      );
+    }
+    return;
+  }
   if (ROLE_RANK[caller.role] !== ROLE_RANK[target.role] + 1) {
     throw new AppError(
       403,

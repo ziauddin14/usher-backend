@@ -13,6 +13,14 @@ export const ROLE_RANK: Record<Role, number> = {
 };
 
 export const ZIMMEDARI = ['ushar', 'tehsil_town', 'event'] as const;
+
+/**
+ * Explicit, designated permissions (CTO 5 Nov 2026) — never implied by the role.
+ * VERIFY_SUBA_MOBILE: a pakistan-level account designated to verify suba accounts' self-entered
+ * mobiles ("designated Pakistan Admin"). Set only with scripts/designate-verifier.ts (audited).
+ */
+export const PERMISSIONS = ['VERIFY_SUBA_MOBILE'] as const;
+export type Permission = (typeof PERMISSIONS)[number];
 export type Zimmedari = (typeof ZIMMEDARI)[number];
 
 const userSchema = new Schema(
@@ -41,6 +49,8 @@ const userSchema = new Schema(
      * an older version stops working, so all logged-in devices must log in again.
      */
     sessionVersion: { type: Number, default: 0 },
+    /** Designated permissions (see PERMISSIONS); empty for almost everybody. */
+    permissions: { type: [{ type: String, enum: PERMISSIONS }], default: [] },
     isDemo: { type: Boolean, default: false },
   },
   { timestamps: true },

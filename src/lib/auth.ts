@@ -1,7 +1,7 @@
 import type { CookieOptions, Request, RequestHandler, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { Types } from 'mongoose';
-import { type Role, ROLE_RANK, User, type Zimmedari } from '../models/user.js';
+import { type Permission, type Role, ROLE_RANK, User, type Zimmedari } from '../models/user.js';
 import { connectDb } from './db.js';
 import { env } from './env.js';
 import { AppError } from './errors.js';
@@ -22,6 +22,8 @@ export interface AuthUser {
   mustChangePassword: boolean;
   /** users.sessionVersion when the session was checked (see signSession). */
   sessionVersion?: number;
+  /** Designated permissions, re-read on every request (never implied by the role). */
+  permissions?: Permission[];
 }
 
 interface TokenPayload {
@@ -106,7 +108,7 @@ async function loadSessionUser(req: Request): Promise<void> {
   await connectDb();
   const user = await User.findById(payload.sub)
     .select(
-      'ajeerCode name nameUr role zimmedari unitCode unitPath isActive mustChangePassword mobileVerified sessionVersion',
+      'ajeerCode name nameUr role zimmedari unitCode unitPath isActive mustChangePassword mobileVerified sessionVersion permissions',
     )
     .lean();
   if (!user?.isActive || (payload.sv ?? 0) !== (user.sessionVersion ?? 0)) {
@@ -126,6 +128,7 @@ async function loadSessionUser(req: Request): Promise<void> {
     unitPath: user.unitPath,
     mustChangePassword: user.mustChangePassword,
     sessionVersion: user.sessionVersion ?? 0,
+    permissions: user.permissions ?? [],
   };
 }
 

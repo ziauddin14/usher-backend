@@ -13,6 +13,8 @@ import { INITIAL_PASSWORD } from './schemas.js';
 export const BCRYPT_COST = 10;
 
 export interface PublicUser {
+  /** Designated permissions (e.g. VERIFY_SUBA_MOBILE) — the UI shows the matching actions. */
+  permissions: string[];
   id: string;
   ajeerCode: string;
   name: string;
@@ -44,6 +46,7 @@ export async function publicUser(user: AuthUser): Promise<PublicUser> {
       level: unit.level,
     },
     mustChangePassword: user.mustChangePassword,
+    permissions: user.permissions ?? [],
   };
 }
 
