@@ -10,7 +10,14 @@ import { Unit } from '../../models/unit.js';
 import { NOT_CENTRALLY_MANAGED, User } from '../../models/user.js';
 import { seedDemo } from '../../seed/seed.js';
 import { provisionPakistanAdmin } from '../users/provision.js';
-import { importEmployees, readEmployeeSheet, validateRows, ZIMMEDARI_MAP } from './employees.js';
+import {
+  hrCodesFromPlan,
+  importEmployees,
+  readEmployeeSheet,
+  validateRows,
+  writeEmployeeReport,
+  ZIMMEDARI_MAP,
+} from './employees.js';
 
 const HEADER = [
   'Ajeer Code',
@@ -410,5 +417,83 @@ describe('employee import never creates or changes a Pakistan Admin (CTO 6 Nov 2
     const plain = await User.collection.findOne({ ajeerCode: '881009' });
     expect(plain).not.toHaveProperty('department');
     expect(plain).not.toHaveProperty('provisioned');
+  });
+});
+
+describe('unknown designations and held codes (CTO 7 Nov 2026)', () => {
+  let tmp: string;
+  beforeAll(async () => {
+    tmp = await mkdtemp(join(tmpdir(), 'ushr-desig-'));
+    await seedDemo({ reset: true });
+  });
+  afterAll(async () => {
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it('an unknown designation is never given a role: rejected, listed, and tabled for confirmation', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('HR');
+    ws.addRow(HEADER);
+    ws.addRow([
+      '881001',
+      'Invented A',
+      '',
+      'آفس ذمہ دار',
+      'Interior Sindh',
+      'Sukkur',
+      'Ghotki',
+      '',
+    ]);
+    ws.addRow([
+      '881002',
+      'Invented B',
+      '',
+      'آفس ذمہ دار',
+      'Interior Sindh',
+      'Sukkur',
+      'Ghotki',
+      '',
+    ]);
+    ws.addRow(['881003', 'Invented C', '', 'نگران مجلس', 'Interior Sindh', 'Sukkur', 'Ghotki', '']);
+    ws.addRow(['881004/2', 'Invented D', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', '']);
+    ws.addRow(['881005', 'Invented E', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', '']);
+    const path = join(tmp, 'hr.xlsx');
+    await wb.xlsx.writeFile(path);
+
+    const result = await importEmployees(await readEmployeeSheet(path), { dryRun: false });
+    expect(result.created).toBe(1);
+    expect(result.unknownDesignations.map((d) => [d.ajeerCode, d.zimmedari])).toEqual([
+      ['881001', 'آفس ذمہ دار'],
+      ['881002', 'آفس ذمہ دار'],
+      ['881003', 'نگران مجلس'],
+    ]);
+    expect(
+      await User.countDocuments({ ajeerCode: { $in: ['881001', '881002', '881003', '881004'] } }),
+    ).toBe(0);
+
+    const plan = validateRows(await readEmployeeSheet(path));
+    const codes = hrCodesFromPlan(plan);
+    expect([...codes.held]).toEqual(['881004']);
+    expect([...codes.rejected].sort()).toEqual(['881001', '881002', '881003']);
+
+    const out = join(tmp, 'report.xlsx');
+    await writeEmployeeReport(result, out);
+    const rb = new ExcelJS.Workbook();
+    await rb.xlsx.readFile(out);
+    const table = rb.getWorksheet('Designation - tasdeeq')!;
+    expect(table.getRow(1).values).toEqual([
+      undefined,
+      'Designation (file)',
+      'Rows',
+      'Role (department to confirm)',
+      'Notes',
+    ]);
+    expect([table.getRow(2).getCell(1).text, table.getRow(2).getCell(2).value]).toEqual([
+      'آفس ذمہ دار',
+      2,
+    ]);
+    expect(table.getRow(2).getCell(3).text).toBe(''); // never filled automatically
+    expect(rb.getWorksheet('Designation rows')!.rowCount).toBe(4);
+    expect(rb.getWorksheet('Code 2, 3 - rukay hue')!.rowCount).toBe(2);
   });
 });
