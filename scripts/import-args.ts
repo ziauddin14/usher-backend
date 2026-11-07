@@ -22,7 +22,7 @@ export function parseImportArgs(argv: string[], command: string): ImportArgs {
   const usage = `Usage: pnpm ${command} <file.xlsx> --dry-run\n       pnpm ${command} <file.xlsx> --operator "<who>" --confirm=<database name>`;
   const dryRun = argv.includes('--dry-run');
   const values = new Set(
-    ['--operator', '--confirm'].map((o) => argv.indexOf(o) + 1).filter((i) => i > 0),
+    ['--operator', '--confirm', '--hr'].map((o) => argv.indexOf(o) + 1).filter((i) => i > 0),
   );
   const file = argv.find((a, i) => !a.startsWith('--') && !values.has(i));
   if (!file) {

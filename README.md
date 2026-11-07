@@ -62,8 +62,8 @@ Both always use the live database (`LIVE_MONGODB_URI`, or `MONGODB_URI`'s server
 ```bash
 pnpm import:employees private/<hr-file>.xlsx --dry-run
 pnpm import:employees private/<hr-file>.xlsx --operator "<who>" --confirm=ushr_live
-pnpm import:villages  private/<gaon-file>.xlsx --dry-run
-pnpm import:villages  private/<gaon-file>.xlsx --operator "<who>" --confirm=ushr_live
+pnpm import:villages  private/<gaon-file>.xlsx --hr private/<hr-file>.xlsx --dry-run
+pnpm import:villages  private/<gaon-file>.xlsx --hr private/<hr-file>.xlsx --operator "<who>" --confirm=ushr_live
 ```
 
 - A dry run writes nothing; every run writes an Excel report to `private/` (rejected rows,
@@ -77,8 +77,18 @@ pnpm import:villages  private/<gaon-file>.xlsx --operator "<who>" --confirm=ushr
   role / zimmedari / unit changes are applied
   (HR is the source) and listed on the report sheet "Tabdeeliyan".
 - **Villages** — matched per district by normalized name, an earlier spelling or a merged duplicate;
-  otherwise created (`source: import`, file, row). A village already given to a zimmedar keeps its
-  assignment; merged villages never come back.
+  otherwise created (`source: import`, file, row); one village per district + name. A village already
+  given to a zimmedar keeps its assignment; merged villages never come back.
+  - `Employee Code` is the Ajeer Code, matched **exactly**; `Usher Zimmedar Name` is a reference in
+    the report only, never matched. Only a user whose role is `zimmedar` gets an assignment; a
+    supervisor's villages go to the district pool. The village contact columns are never read.
+  - `--hr` (required): codes the HR file holds back (`/2`, `/3` …, also when a `/1` row of the
+    same code exists) and employees it rejects never get villages — report sheets "Code 2, 3 - rukay
+    hue" and "Employee import nahi hua". A District that differs from the named employee's own
+    district is not imported ("District farq").
+- **Designations** that map to no role are rejected and tabled on "Designation - tasdeeq" (designation,
+  rows, a blank role column for the department) and "Designation rows"; no role is assigned
+  automatically.
 
 Columns read (header text; case, spaces and punctuation ignored): see `COLUMNS` in
 `src/modules/import/employees.ts` and `src/modules/import/villages.ts`.

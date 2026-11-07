@@ -44,7 +44,7 @@ describe('village import', () => {
       ['گوٹھ   نیا گاؤں', 'Ubauro', 'Ghotki', '9090412'], // same village again (donor rows)
       ['نیا گاؤں', 'Ubauro', 'Ghotki', otherCode], // same nameKey, other zimmedar → conflict
       [existing.name, 'Ghotki', 'Ghotki District', otherCode], // existing seeded village
-      ['گوٹھ نام سے', 'Ghotki', 'Ghotki', 'Muhammad Arif'], // zimmedar by name
+      ['گوٹھ نام سے', 'Ghotki', 'Ghotki', 'Muhammad Arif'], // a name, not a code → never matched
       ['گوٹھ بے نام', 'Ghotki', 'Ghotki', '55555'], // unknown code → unassigned
       ['گوٹھ ضلعی', 'Ghotki', '', '9040001'], // a district user → district pool
       ['گوٹھ کہیں نہیں', 'X', 'Atlantis', ''], // district not found → not imported
@@ -77,7 +77,7 @@ describe('village import', () => {
       duplicateRows: 2,
       created: 5,
       updated: 1,
-      assigned: 3,
+      assigned: 2, // only by exact Ajeer Code (CTO 7 Nov 2026)
     });
     expect(result.unmatchedVillages.map((u) => u.row)).toEqual([9]);
     expect(result.noName.map((u) => u.row)).toEqual([10]);
@@ -85,6 +85,7 @@ describe('village import', () => {
       'Ajeer code 9040001 is a district user → district pool',
     ]);
     expect(result.unmatchedZimmedar.map((u) => u.problem)).toEqual([
+      'Employee Code "Muhammad Arif" is not an Ajeer Code',
       'Ajeer code 55555 not found (import employees first)',
       'No zimmedar given',
     ]);
@@ -112,8 +113,9 @@ describe('village import', () => {
     }).lean();
     expect(String(rahim!.assignedTo)).toBe(String(other!._id));
 
+    // A zimmedar's name is never matched: imported, nobody assigned (exception sheet).
     const byName = await Village.findOne({ nameKey: 'نام سے' }).lean();
-    expect(String(byName!.assignedTo)).toBe(String(arif!._id));
+    expect(byName?.assignedTo).toBeUndefined();
 
     const unassigned = await Village.findOne({ nameKey: 'بے نام' }).lean();
     expect(unassigned?.assignedTo).toBeUndefined();
@@ -140,6 +142,9 @@ describe('village import', () => {
     expect(wb.worksheets.map((w) => w.name)).toEqual([
       'Gaon nahi mile',
       'Bina naam',
+      'District farq',
+      'Code 2, 3 - rukay hue',
+      'Employee import nahi hua',
       'District pool',
       'Zimmedar nahi mila',
       'Aik gaon, kai zimmedar',

@@ -119,6 +119,15 @@ export interface ImportPlan {
   sameCode: SameCodeGroup[];
   /** Rows whose code ends in something other than "/1" ("12345/2", "12345/3"). */
   otherSuffix: SameCodeGroup['rows'];
+  /** Rows whose designation (Zimmedari) maps to no role: rejected, listed for confirmation. */
+  unknownDesignations: UnknownDesignation[];
+}
+
+/** A row whose designation is not mapped to a role — never given one automatically (CTO 7 Nov). */
+export interface UnknownDesignation {
+  row: number;
+  ajeerCode?: string;
+  zimmedari: string;
 }
 
 export interface ImportResult {
@@ -140,6 +149,8 @@ export interface ImportResult {
    * change is applied) — listed so the dry run shows every change of access before the real run.
    */
   changes: { row: number; ajeerCode: string; field: string; from: string; to: string }[];
+  /** Designations that map to no role (rows rejected) — the department confirms the mapping. */
+  unknownDesignations: UnknownDesignation[];
 }
 
 /** Who ran an import and from which file (kept on the accounts and in the audit log). */
@@ -151,7 +162,7 @@ export interface ImportSource {
 }
 
 /** A code suffix other than /1: held for the CTO, never imported. */
-const HELD_SUFFIX = /\/(?!1$)/;
+export const HELD_SUFFIX = /\/(?!1$)/;
 
 const clean = (s: string | undefined) => s?.replace(/\s+/g, ' ').trim() || undefined;
 const hasUrduScript = (s: string) => /[؀-ۿ]/.test(s);
@@ -166,6 +177,7 @@ export function validateRows(rows: RawRow[]): ImportPlan {
   const valid: ValidRow[] = [];
   const errors: RowProblem[] = [];
   const warnings: RowProblem[] = [];
+  const unknownDesignations: UnknownDesignation[] = [];
   const seen = new Set<string>();
   const byCode = new Map<string, SameCodeGroup['rows']>();
 
@@ -211,6 +223,11 @@ export function validateRows(rows: RawRow[]): ImportPlan {
 
     const mapped = ZIMMEDARI_MAP[headerKey(values.zimmedari ?? '')];
     if (!mapped) {
+      unknownDesignations.push({
+        row,
+        ...(ajeerCode ? { ajeerCode } : {}),
+        zimmedari: clean(values.zimmedari) ?? '',
+      });
       problems.push(
         `Zimmedari "${values.zimmedari ?? ''}" is not a Demo v1 role (Ushar, Tehsil-Town, Event, District, Division, Suba)`,
       );
@@ -241,7 +258,7 @@ export function validateRows(rows: RawRow[]): ImportPlan {
       warnings.push({
         row,
         ajeerCode,
-        message: 'No mobile — this user cannot do the first login until a mobile is added',
+        message: 'No mobile in the file (optional — the user may add it in their profile)',
       });
     }
     valid.push({
@@ -270,7 +287,23 @@ export function validateRows(rows: RawRow[]): ImportPlan {
     .filter((r) => HELD_SUFFIX.test(r.ajeerCodeFull))
     .map((r) => ({ ...r, imported: valid.some((v) => v.row === r.row) }))
     .sort((a, b) => a.row - b.row);
-  return { valid, errors, warnings, sameCode, otherSuffix };
+  return { valid, errors, warnings, sameCode, otherSuffix, unknownDesignations };
+}
+
+/**
+ * For the village import (CTO 7 Nov 2026): Ajeer Codes the HR file holds back — every base code
+ * written with /2, /3 … (even when a /1 row of it exists: the village rows cannot tell them apart)
+ * — and codes the employee import rejects. Villages naming them are never assigned.
+ */
+export function hrCodesFromPlan(plan: ImportPlan): { held: Set<string>; rejected: Set<string> } {
+  const held = new Set(plan.otherSuffix.map((r) => r.ajeerCodeFull.split('/')[0]!));
+  const imported = new Set(plan.valid.map((v) => v.ajeerCode));
+  const rejected = new Set(
+    plan.errors
+      .map((e) => e.ajeerCode)
+      .filter((c): c is string => !!c && !imported.has(c) && !held.has(c)),
+  );
+  return { held, rejected };
 }
 
 interface UnitRef {
@@ -476,6 +509,7 @@ export async function importEmployees(
     warnings: plan.warnings,
     sameCode: plan.sameCode,
     otherSuffix: plan.otherSuffix,
+    unknownDesignations: plan.unknownDesignations,
     mobileConflicts,
     changes,
   };
@@ -632,6 +666,21 @@ export async function writeEmployeeReport(result: ImportResult, file: string): P
     'Tabdeeliyan',
     ['Row', 'Ajeer code', 'Kya badla', 'Pehle', 'Ab'],
     result.changes.map((c) => [c.row, c.ajeerCode, c.field, c.from, c.to]),
+  );
+  // Mapping table for the department to fill in (no role is assigned automatically).
+  const byDesignation = new Map<string, number>();
+  for (const d of result.unknownDesignations) {
+    byDesignation.set(d.zimmedari, (byDesignation.get(d.zimmedari) ?? 0) + 1);
+  }
+  sheet(
+    'Designation - tasdeeq',
+    ['Designation (file)', 'Rows', 'Role (department to confirm)', 'Notes'],
+    [...byDesignation].sort((x, y) => y[1] - x[1]).map(([z, n]) => [z, n, '', '']),
+  );
+  sheet(
+    'Designation rows',
+    ['Row', 'Ajeer code', 'Designation'],
+    result.unknownDesignations.map((d) => [d.row, d.ajeerCode ?? '', d.zimmedari]),
   );
   await wb.xlsx.writeFile(file);
 }

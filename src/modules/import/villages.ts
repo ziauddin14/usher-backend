@@ -3,11 +3,12 @@
 // somebody is already responsible for it (an import never undoes the District's assignment).
 import ExcelJS from 'exceljs';
 import { type AnyBulkWriteOperation, Types } from 'mongoose';
-import { normalizeAjeerCode } from '../../lib/ajeer-code.js';
+import { fullAjeerCode, normalizeAjeerCode } from '../../lib/ajeer-code.js';
 import { audit } from '../../lib/audit.js';
 import { connectDb } from '../../lib/db.js';
 import { DistrictNames } from '../../lib/district-names.js';
 import { villageNameKey } from '../../lib/text.js';
+import { HELD_SUFFIX } from './employees.js';
 import { unitKey } from '../../lib/unit-name.js';
 import { headerKey, loadWorkbook, readRows } from '../../lib/xlsx.js';
 import { Unit } from '../../models/unit.js';
@@ -25,6 +26,7 @@ const COLUMNS = {
     'Zimmedar ID',
     'ID',
     'Login Id',
+    'Employee Code',
     'اجیر کوڈ',
     'عملہ کوڈ',
   ],
@@ -34,6 +36,7 @@ const COLUMNS = {
     'Zimmedar Name',
     'User Name',
     'Ushar Zimmedar',
+    'Usher Zimmedar Name',
     'عشر ذمہ دار',
   ],
 } as const;
@@ -57,6 +60,8 @@ export interface UnmatchedRow {
   tehsil: string;
   district: string;
   zimmedar: string;
+  /** "Usher Zimmedar Name" as written in the file — a reference only, never matched. */
+  zimmedarName: string;
   problem: string;
 }
 
@@ -96,6 +101,18 @@ export interface VillageImportResult {
   assignmentKept: { village: string; district: string; current: string; inFile: string }[];
   /** File names that matched a village under an earlier spelling (renamed or merged). */
   formerNameMatches: { inFile: string; district: string; village: string }[];
+  /** Rows naming an Ajeer Code the HR file holds back (/2, /3 …): never assigned (CTO 7 Nov). */
+  heldCode: UnmatchedRow[];
+  /** Rows naming an employee the HR import rejected (e.g. designation not confirmed). */
+  notImportedEmployee: UnmatchedRow[];
+  /** Rows whose District differs from the named employee's own district: not imported. */
+  districtMismatch: UnmatchedRow[];
+}
+
+/** From the HR file: codes held back (/2, /3 …) and codes the employee import rejected. */
+export interface HrCodes {
+  held: Set<string>;
+  rejected: Set<string>;
 }
 
 /** Who ran an import and from which file (kept on new villages and in the audit log). */
@@ -131,14 +148,14 @@ export async function importVillages(
     dryRun,
     names = DistrictNames.load(),
     source,
-  }: { dryRun: boolean; names?: DistrictNames; source?: VillageImportSource },
+    hr,
+  }: { dryRun: boolean; names?: DistrictNames; source?: VillageImportSource; hr?: HrCodes },
 ): Promise<VillageImportResult> {
   await connectDb();
   const startedAt = new Date();
 
   const users = await User.find().select('_id ajeerCode name nameUr role unitCode unitPath').lean();
   const byCode = new Map(users.map((u) => [u.ajeerCode, u]));
-  const nameKeyOf = (s: string) => headerKey(s);
 
   const units = await Unit.find().select('code name nameUr level parentCode path').lean();
   const unitByCode = new Map(units.map((u) => [u.code, u]));
@@ -170,6 +187,9 @@ export async function importVillages(
   const noName: UnmatchedRow[] = [];
   const districtPool: UnmatchedRow[] = [];
   const unmatchedZimmedar: UnmatchedRow[] = [];
+  const heldCode: UnmatchedRow[] = [];
+  const notImportedEmployee: UnmatchedRow[] = [];
+  const districtMismatch: UnmatchedRow[] = [];
   const labels = new Map<string, string>(); // user id → "<ajeer code> <name>"
   let duplicateRows = 0;
 
@@ -179,13 +199,16 @@ export async function importVillages(
     const districtText = clean(values.district);
     const codeText = clean(values.zimmedarCode);
     const code = normalizeAjeerCode(codeText);
-    const zimmedarText = code ? '' : codeText || clean(values.zimmedarName);
+    const codeFull = fullAjeerCode(codeText) ?? '';
+    // "Usher Zimmedar Name": a reference for the reports only — never used to match (CTO 7 Nov).
+    const refName = clean(values.zimmedarName);
     const report = (problem: string): UnmatchedRow => ({
       row,
       village: name,
       tehsil,
       district: districtText,
-      zimmedar: code ?? zimmedarText,
+      zimmedar: codeText,
+      zimmedarName: refName,
       problem,
     });
 
@@ -194,24 +217,44 @@ export async function importVillages(
       continue;
     }
 
-    // 1. District: from the zimmedar's own district, else by name (inside the user's area).
-    const user = code ? byCode.get(code) : undefined;
-    let district: { code: string; path: string } | undefined;
-    if (user && (user.role === 'zimmedar' || user.role === 'district')) {
-      const d = districtByPath.get(user.unitPath);
-      if (d) district = { code: d.code, path: d.path };
-    }
-    if (!district && districtText) {
+    // Codes the HR file holds back (/2, /3 … or a base code that also has such a row) and codes
+    // of employees the HR import rejected: their villages are never assigned (CTO 7 Nov 2026).
+    const held = !!code && (HELD_SUFFIX.test(codeFull) || (hr?.held.has(code) ?? false));
+    const rejected = !!code && !held && (hr?.rejected.has(code) ?? false);
+    const user = code && !held && !rejected ? byCode.get(code) : undefined;
+
+    // 1. District: the file's District column and, for a zimmedar / district user, their own
+    //    district. When both are known they must agree, else the row is an exception.
+    let fileDistrict: { code: string; path: string } | undefined;
+    if (districtText) {
       const chain = names.forVillageFileName(districtText);
       const mapped = chain
         ? districtByUrduChain.get(urduKey(chain.subaUr, chain.divisionUr, chain.districtUr))
         : undefined;
-      const candidates = (
-        mapped ? [mapped] : (districtsByKey.get(unitKey(districtText)) ?? [])
-      ).filter((d) => !user || d.path === user.unitPath || d.path.startsWith(`${user.unitPath}/`));
-      if (candidates.length === 1)
-        district = { code: candidates[0]!.code, path: candidates[0]!.path };
+      const candidates = mapped ? [mapped] : (districtsByKey.get(unitKey(districtText)) ?? []);
+      if (candidates.length === 1) {
+        fileDistrict = { code: candidates[0]!.code, path: candidates[0]!.path };
+      }
     }
+    let userDistrict: { code: string; path: string } | undefined;
+    if (user && (user.role === 'zimmedar' || user.role === 'district')) {
+      const d = districtByPath.get(user.unitPath);
+      if (d) userDistrict = { code: d.code, path: d.path };
+    }
+    const outsideUser =
+      user &&
+      !userDistrict &&
+      fileDistrict &&
+      !(fileDistrict.path === user.unitPath || fileDistrict.path.startsWith(`${user.unitPath}/`));
+    if ((userDistrict && fileDistrict && userDistrict.path !== fileDistrict.path) || outsideUser) {
+      districtMismatch.push(
+        report(
+          `District "${districtText}" is not the district of Ajeer code ${code} (${user!.unitCode}) — not imported`,
+        ),
+      );
+      continue;
+    }
+    const district = userDistrict ?? fileDistrict;
     if (!district) {
       unmatchedVillages.push(
         report(districtText ? `District "${districtText}" not found` : 'District is missing'),
@@ -219,33 +262,27 @@ export async function importVillages(
       continue;
     }
 
-    // 2. Zimmedar: by ajeer code, else by name among the district's zimmedaran.
+    // 2. Zimmedar: only by the exact Ajeer Code, and only a user whose role is zimmedar.
     let assignee: { id: string; label: string } | undefined;
     let zimmedarProblem: string | undefined;
     let poolReason: string | undefined;
-    if (code) {
+    if (held) {
+      heldCode.push(report(`Ajeer code ${codeFull || code} is held (/2, /3) — CTO decides`));
+    } else if (rejected) {
+      notImportedEmployee.push(
+        report(`Ajeer code ${code} was not imported from the HR file (see its report)`),
+      );
+    } else if (code) {
       if (!user) zimmedarProblem = `Ajeer code ${code} not found (import employees first)`;
       else if (user.role !== 'zimmedar') {
         poolReason = `Ajeer code ${code} is a ${user.role} user → district pool`;
       } else if (user.unitPath !== district.path) {
         zimmedarProblem = `Ajeer code ${code} belongs to another district`;
       } else assignee = { id: String(user._id), label: `${user.ajeerCode} ${user.name}` };
-    } else if (zimmedarText) {
-      const key = nameKeyOf(zimmedarText);
-      const found = users.filter(
-        (u) =>
-          u.role === 'zimmedar' &&
-          u.unitPath === district.path &&
-          (nameKeyOf(u.name) === key || (u.nameUr ? nameKeyOf(u.nameUr) === key : false)),
-      );
-      if (found.length === 1) {
-        assignee = { id: String(found[0]!._id), label: `${found[0]!.ajeerCode} ${found[0]!.name}` };
-      } else {
-        zimmedarProblem =
-          found.length > 1
-            ? `More than one zimmedar named "${zimmedarText}" in the district`
-            : `Zimmedar "${zimmedarText}" not found in the district`;
-      }
+    } else if (codeText) {
+      zimmedarProblem = `Employee Code "${codeText}" is not an Ajeer Code`;
+    } else if (refName) {
+      zimmedarProblem = 'No Ajeer Code (zimmedar name kept for reference only)';
     } else {
       zimmedarProblem = 'No zimmedar given';
     }
@@ -350,6 +387,9 @@ export async function importVillages(
     conflicts,
     assignmentKept,
     formerNameMatches,
+    heldCode,
+    notImportedEmployee,
+    districtMismatch,
   };
   if (dryRun || plans.length === 0) return result;
 
@@ -434,7 +474,7 @@ export async function importVillages(
 
 const LIVE_STATUS: ('approved' | 'pending')[] = ['approved', 'pending'];
 
-/** Excel report with one sheet per problem list (Urdu text is kept as is). */
+/** Excel report with one sheet per problem list (Urdu text is kept as is; stays in private/). */
 export async function writeVillageReport(result: VillageImportResult, file: string): Promise<void> {
   const wb = new ExcelJS.Workbook();
   const sheet = (name: string, columns: string[], rows: (string | number)[][]) => {
@@ -443,40 +483,36 @@ export async function writeVillageReport(result: VillageImportResult, file: stri
     for (const r of rows) ws.addRow(r);
     ws.columns.forEach((c) => (c.width = 24));
   };
-  sheet(
-    'Gaon nahi mile',
-    ['Row', 'Gaon', 'Tehsil', 'District', 'Zimmedar', 'Masla'],
-    result.unmatchedVillages.map((u) => [
-      u.row,
-      u.village,
-      u.tehsil,
-      u.district,
-      u.zimmedar,
-      u.problem,
-    ]),
-  );
-  sheet(
-    'Bina naam',
-    ['Row', 'Gaon', 'Tehsil', 'District', 'Zimmedar', 'Masla'],
-    result.noName.map((u) => [u.row, u.village, u.tehsil, u.district, u.zimmedar, u.problem]),
-  );
-  sheet(
-    'District pool',
-    ['Row', 'Gaon', 'Tehsil', 'District', 'Kis ke naam', 'Baat'],
-    result.districtPool.map((u) => [u.row, u.village, u.tehsil, u.district, u.zimmedar, u.problem]),
-  );
-  sheet(
-    'Zimmedar nahi mila',
-    ['Row', 'Gaon', 'Tehsil', 'District', 'Zimmedar', 'Masla'],
-    result.unmatchedZimmedar.map((u) => [
-      u.row,
-      u.village,
-      u.tehsil,
-      u.district,
-      u.zimmedar,
-      u.problem,
-    ]),
-  );
+  const ROW_COLUMNS = [
+    'Row',
+    'Gaon',
+    'Tehsil',
+    'District',
+    'Employee Code',
+    'Naam (reference)',
+    'Masla',
+  ];
+  const rowSheet = (name: string, list: UnmatchedRow[]) =>
+    sheet(
+      name,
+      ROW_COLUMNS,
+      list.map((u) => [
+        u.row,
+        u.village,
+        u.tehsil,
+        u.district,
+        u.zimmedar,
+        u.zimmedarName,
+        u.problem,
+      ]),
+    );
+  rowSheet('Gaon nahi mile', result.unmatchedVillages);
+  rowSheet('Bina naam', result.noName);
+  rowSheet('District farq', result.districtMismatch);
+  rowSheet('Code 2, 3 - rukay hue', result.heldCode);
+  rowSheet('Employee import nahi hua', result.notImportedEmployee);
+  rowSheet('District pool', result.districtPool);
+  rowSheet('Zimmedar nahi mila', result.unmatchedZimmedar);
   sheet(
     'Aik gaon, kai zimmedar',
     ['Gaon', 'District', 'Zimmedaran (rows)', 'Chuna gaya'],
