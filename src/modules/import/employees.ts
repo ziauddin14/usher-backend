@@ -36,7 +36,7 @@ const COLUMNS = {
   mobile: ['Mobile', 'Mobile No', 'Mobile Number', 'Phone', 'موبائل', 'موبائل نمبر'],
 } as const;
 type Column = keyof typeof COLUMNS;
-const COLUMN_KEYS = Object.fromEntries(
+export const COLUMN_KEYS = Object.fromEntries(
   Object.entries(COLUMNS).map(([c, names]) => [c, (names as readonly string[]).map(headerKey)]),
 ) as Record<Column, string[]>;
 
@@ -131,7 +131,7 @@ export interface ImportResult {
   warnings: RowProblem[];
   /** Codes on more than one row: the first row is imported, the others are rejected. */
   sameCode: SameCodeGroup[];
-  /** Rows whose code ends in something other than "/1" — listed for the CTO. */
+  /** Rows whose code ends in something other than "/1": held (never imported) for the CTO. */
   otherSuffix: SameCodeGroup['rows'];
   /** Existing users whose file mobile differs from the one on record — the record is kept. */
   mobileConflicts: { row: number; ajeerCode: string; onRecord: string; inFile: string }[];
@@ -149,6 +149,9 @@ export interface ImportSource {
   /** The operator who ran it (e.g. "cli:<name>"), recorded as the audit actor. */
   operator: string;
 }
+
+/** A code suffix other than /1: held for the CTO, never imported. */
+const HELD_SUFFIX = /\/(?!1$)/;
 
 const clean = (s: string | undefined) => s?.replace(/\s+/g, ' ').trim() || undefined;
 const hasUrduScript = (s: string) => /[؀-ۿ]/.test(s);
@@ -169,6 +172,21 @@ export function validateRows(rows: RawRow[]): ImportPlan {
   for (const { row, values } of rows) {
     const ajeerCode = normalizeAjeerCode(values.ajeerCode) ?? '';
     const ajeerCodeFull = fullAjeerCode(values.ajeerCode) ?? ajeerCode;
+    // A code written with a suffix other than /1 ("12345/2", "12345/3") is never imported and never
+    // blocks a /1 row of the same code: its meaning is for the CTO to decide after seeing the HR
+    // file (CTO 7 Nov 2026). It goes to its own report sheet only.
+    if (ajeerCode && HELD_SUFFIX.test(ajeerCodeFull)) {
+      const group = byCode.get(ajeerCode) ?? [];
+      group.push({
+        row,
+        ajeerCodeFull,
+        name: clean(values.name) ?? '',
+        zimmedari: clean(values.zimmedari) ?? '',
+        district: clean(values.district) ?? '',
+      });
+      byCode.set(ajeerCode, group);
+      continue;
+    }
     const problems: string[] = [];
     if (!ajeerCode) problems.push('Ajeer Code must be 3–9 digits (optionally followed by /n)');
     else if (seen.has(ajeerCode)) {
@@ -249,7 +267,7 @@ export function validateRows(rows: RawRow[]): ImportPlan {
     }));
   const otherSuffix = [...byCode.values()]
     .flat()
-    .filter((r) => /\/(?!1$)/.test(r.ajeerCodeFull))
+    .filter((r) => HELD_SUFFIX.test(r.ajeerCodeFull))
     .map((r) => ({ ...r, imported: valid.some((v) => v.row === r.row) }))
     .sort((a, b) => a.row - b.row);
   return { valid, errors, warnings, sameCode, otherSuffix };
@@ -589,7 +607,7 @@ export async function writeEmployeeReport(result: ImportResult, file: string): P
     ),
   );
   sheet(
-    'Code 2, 3',
+    'Code 2, 3 - rukay hue',
     ['Row', 'Poora code', 'Naam', 'Zimmedari', 'District', 'Import hua?'],
     result.otherSuffix.map((r) => [
       r.row,

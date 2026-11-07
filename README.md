@@ -35,11 +35,11 @@ Tests use `mongodb-memory-server` (no running database needed).
 
 `render.yaml` is the blueprint (no secrets in it):
 
-| | |
-|---|---|
-| Build | `corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm build` |
-| Start | `pnpm start` → `node dist/server.js` |
-| Health check | `GET /api/v1/health` (200 when the database answers, 503 when not) |
+|                 |                                                                                                                  |
+| --------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Build           | `corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm build`                                   |
+| Start           | `pnpm start` → `node dist/server.js`                                                                             |
+| Health check    | `GET /api/v1/health` (200 when the database answers, 503 when not)                                               |
 | Env (dashboard) | `MONGODB_URI`, `JWT_SECRET`, `ALLOWED_ORIGIN` (https Vercel origin), `NODE_ENV=production`, `TRUST_PROXY_HOPS=2` |
 
 With `NODE_ENV=production` the session cookie is `Secure` and the API refuses to start with a local
@@ -85,15 +85,30 @@ Columns read (header text; case, spaces and punctuation ignored): see `COLUMNS` 
 
 ## District Gaon management and mobile changes (API)
 
-| Endpoint | Who | What |
-|---|---|---|
-| `POST /villages/manage` `{ name, districtCode?, assignTo? }` | district and above, in scope | Add an approved village (409 `VILLAGE_EXISTS` with the existing one — assign that instead) |
-| `PATCH /villages/:id` `{ name?, tehsil? }` | district and above | Correct spelling / tehsil; the old name stays in `formerNames` |
-| `GET /villages/duplicates?unit=` | district and above | Look-alike names in a district (suggestion only) |
-| `POST /villages/:id/assign` · `/merge` · `/approve` | district and above | Assign / reassign, merge, approve (existing) |
-| `GET /auth/mobile` · `POST`/`DELETE /auth/mobile-change` | any user (password changed) | Own masked number; ask for / withdraw a new number |
-| `GET /users?mobileStatus=change` | supervisors | Open mobile-change requests below them |
-| `GET /users/:id/pending-mobile-change` · `POST …/confirm-mobile-change` · `…/reject-mobile-change` | the user's verifier only (same hierarchy as a first-login number) | View (audited) / confirm / reject |
+| Endpoint                                                                                           | Who                                                               | What                                                                                       |
+| -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `POST /villages/manage` `{ name, districtCode?, assignTo? }`                                       | district and above, in scope                                      | Add an approved village (409 `VILLAGE_EXISTS` with the existing one — assign that instead) |
+| `PATCH /villages/:id` `{ name?, tehsil? }`                                                         | district and above                                                | Correct spelling / tehsil; the old name stays in `formerNames`                             |
+| `GET /villages/duplicates?unit=`                                                                   | district and above                                                | Look-alike names in a district (suggestion only)                                           |
+| `POST /villages/:id/assign` · `/merge` · `/approve`                                                | district and above                                                | Assign / reassign, merge, approve (existing)                                               |
+| `GET /auth/mobile` · `POST`/`DELETE /auth/mobile-change`                                           | any user (password changed)                                       | Own masked number; ask for / withdraw a new number                                         |
+| `GET /users?mobileStatus=change`                                                                   | supervisors                                                       | Open mobile-change requests below them                                                     |
+| `GET /users/:id/pending-mobile-change` · `POST …/confirm-mobile-change` · `…/reject-mobile-change` | the user's verifier only (same hierarchy as a first-login number) | View (audited) / confirm / reject                                                          |
 
 All of them are audited (`VILLAGE_CREATE`, `VILLAGE_RENAME`, `VILLAGE_REASSIGN`, `VILLAGE_MERGE`,
 `MOBILE_CHANGE_REQUEST`, `…_CANCEL`, `…_VIEW`, `…_CONFIRM`, `…_REJECT`; numbers masked).
+
+**Gaon visibility (CTO 7 Nov 2026):** a zimmedar sees, searches and uses in a jadwal only the villages
+assigned to them. Pool villages and other zimmedaran's villages are never offered; the District
+assigns them. A zimmedar may still propose a brand-new name (pending, District approves); a name
+that already exists answers 409 `VILLAGE_EXISTS` with `mine: false` unless it is already theirs.
+
+**First look at an official file** (no database, prints no names / codes / mobiles):
+
+```bash
+pnpm inspect:file private/<hr-file>.xlsx --kind employees
+pnpm inspect:file private/<gaon-file>.xlsx --kind villages
+```
+
+Ajeer Codes written `/2`, `/3` … are **held**: never imported, listed on the report sheet
+"Code 2, 3 - rukay hue" until the CTO decides their mapping.

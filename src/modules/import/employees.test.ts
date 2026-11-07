@@ -113,11 +113,13 @@ describe('employee import', () => {
 
   it('reports every bad row with its row number', async () => {
     const plan = validateRows(await readEmployeeSheet(file));
-    expect(plan.errors.map((e) => e.row)).toEqual([7, 8, 9, 10, 11]);
+    // Row 11 ("880001/2") is held, not an error (CTO 7 Nov 2026).
+    expect(plan.errors.map((e) => e.row)).toEqual([7, 8, 9, 10]);
     expect(plan.errors.find((e) => e.row === 8)?.message).toMatch(/Zimmedari/);
-    expect(plan.errors.find((e) => e.row === 11)?.message).toMatch(/twice/);
     expect(plan.warnings.map((w) => w.ajeerCode)).toEqual(['880007', '9090412']); // no mobile
-    expect(plan.otherSuffix.map((r) => r.ajeerCodeFull)).toEqual(['880001/2']);
+    expect(plan.otherSuffix).toEqual([
+      expect.objectContaining({ row: 11, ajeerCodeFull: '880001/2', imported: false }),
+    ]);
     // "880001/1" and "880001/2" share the login code 880001: listed for the CTO.
     expect(plan.sameCode).toEqual([
       {
@@ -296,6 +298,26 @@ describe('employee import', () => {
     // Counts only: no names, codes or numbers in the audit entry.
     expect(JSON.stringify(log?.details)).not.toMatch(/Test|0300|880001/);
     await User.updateOne({ ajeerCode: '880001' }, { $set: { permissions: [] } });
+  });
+
+  it('holds every /2 or /3 code: never imported, never blocks the /1 row, listed in its own sheet', async () => {
+    const held = await writeSheet([
+      ['880021/2', 'Held Two', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
+      ['880021/1', 'Kept One', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
+      ['880022/3', 'Held Three', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
+    ]);
+    const result = await importEmployees(await readEmployeeSheet(held), { dryRun: false });
+    expect(result.otherSuffix.map((r) => [r.ajeerCodeFull, r.imported])).toEqual([
+      ['880021/2', false],
+      ['880022/3', false],
+    ]);
+    expect(result.errors).toEqual([]);
+    expect(result.created).toBe(1);
+    expect(await User.findOne({ ajeerCode: '880021' }).lean()).toMatchObject({
+      name: 'Kept One',
+      ajeerCodeFull: '880021/1',
+    });
+    expect(await User.exists({ ajeerCode: '880022' })).toBeNull();
   });
 });
 

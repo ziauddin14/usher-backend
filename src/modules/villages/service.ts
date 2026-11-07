@@ -20,8 +20,9 @@ export interface VillageItem {
 
 /**
  * Villages the caller can choose.
- * Zimmedar, no search: only the villages assigned to them (+ their own pending ones).
- * Zimmedar, with search: all approved villages of their district that match, own villages first.
+ * Zimmedar (CTO 7 Nov 2026): only the villages the District assigned to them (approved, or pending
+ * ones they added and still hold) — with or without a search. The district pool and other
+ * zimmedaran's villages are never offered; the District manages assignments.
  * Supervisors: approved villages in scope (+ their own pending ones).
  * Inside each group: most recently visited first, then by name.
  */
@@ -29,13 +30,12 @@ export async function listVillages(user: AuthUser, q?: string): Promise<VillageI
   await connectDb();
   const me = new Types.ObjectId(user.id);
   const isZimmedar = user.role === 'zimmedar';
-  const own = [
-    { assignedTo: me, status: { $in: ['approved', 'pending'] } },
-    { addedBy: me, status: 'pending' },
-  ];
+  const assigned = { assignedTo: me, status: { $in: ['approved', 'pending'] } };
   const filter: Record<string, unknown> = {
     ...scopeFilter(user),
-    $or: isZimmedar && !q ? own : [...own, { status: 'approved' }],
+    $or: isZimmedar
+      ? [assigned]
+      : [assigned, { addedBy: me, status: 'pending' }, { status: 'approved' }],
   };
   if (q) {
     const key = villageNameKey(q);
@@ -82,7 +82,7 @@ export async function listVillages(user: AuthUser, q?: string): Promise<VillageI
 /**
  * A zimmedar adds a village that is not in the list: saved as `pending` (District approves in
  * Step 4) and usable by them right away. Same normalized name in the district → 409 VILLAGE_EXISTS
- * with the existing village.
+ * with the existing village and whether it is already theirs (`mine`).
  */
 export async function addVillage(user: AuthUser, name: string): Promise<VillageItem> {
   await connectDb();
@@ -95,7 +95,14 @@ export async function addVillage(user: AuthUser, name: string): Promise<VillageI
   }).lean();
   if (existing) {
     throw new AppError(409, 'VILLAGE_EXISTS', 'A village with this name already exists', {
-      village: { id: String(existing._id), name: existing.name, status: existing.status },
+      village: {
+        id: String(existing._id),
+        name: existing.name,
+        status: existing.status,
+        // Only a village already assigned to the caller can be used; any other one waits for the
+        // District to assign it (the screen says so).
+        mine: String(existing.assignedTo) === user.id,
+      },
     });
   }
   const village = await Village.create({
@@ -127,17 +134,17 @@ export async function addVillage(user: AuthUser, name: string): Promise<VillageI
   };
 }
 
-/** A village the zimmedar may put in a jadwal: approved in their district, or their own pending one. */
+/**
+ * A village the zimmedar may put in a jadwal: one assigned to them in their district (approved, or
+ * pending) — never a pool village or another zimmedar's (CTO 7 Nov 2026).
+ */
 export async function findUsableVillage(user: AuthUser, villageId: string) {
   if (!Types.ObjectId.isValid(villageId)) return null;
   return Village.findOne({
     _id: villageId,
     unitPath: user.unitPath,
-    $or: [
-      { status: 'approved' },
-      { status: 'pending', addedBy: new Types.ObjectId(user.id) },
-      { status: 'pending', assignedTo: new Types.ObjectId(user.id) },
-    ],
+    assignedTo: new Types.ObjectId(user.id),
+    status: { $in: ['approved', 'pending'] },
   })
     .select('name')
     .lean();

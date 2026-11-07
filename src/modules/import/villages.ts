@@ -38,7 +38,7 @@ const COLUMNS = {
   ],
 } as const;
 type Column = keyof typeof COLUMNS;
-const COLUMN_KEYS = Object.fromEntries(
+export const COLUMN_KEYS = Object.fromEntries(
   Object.entries(COLUMNS).map(([c, names]) => [c, (names as readonly string[]).map(headerKey)]),
 ) as Record<Column, string[]>;
 
@@ -82,8 +82,8 @@ export interface VillageImportResult {
   noName: UnmatchedRow[];
   /**
    * Villages listed under a District / Division (or other supervisor) user: imported with no
-   * zimmedar ("district pool") — every zimmedar of the district finds them by search, and the
-   * District assigns them in Step 4.
+   * zimmedar ("district pool"). No zimmedar sees or uses them until the District assigns them
+   * (CTO 7 Nov 2026: a zimmedar sees only assigned villages).
    */
   districtPool: UnmatchedRow[];
   /** Villages imported without a zimmedar, because the zimmedar could not be matched. */

@@ -40,7 +40,9 @@ async function main(): Promise<void> {
   console.warn(
     `  same code twice: ${result.sameCode.length} (e.g. /1 and /2 — sheet "Aik code - 1 aur 2")`,
   );
-  console.warn(`  code not /1   : ${result.otherSuffix.length} (sheet "Code 2, 3")`);
+  console.warn(
+    `  held /2, /3   : ${result.otherSuffix.length} (never imported — sheet "Code 2, 3 - rukay hue", CTO decides)`,
+  );
   console.warn(
     `  mobile kept   : ${result.mobileConflicts.length} (different number in the file — sheet "Mobile farq")`,
   );
