@@ -114,3 +114,15 @@ pnpm inspect:file private/<gaon-file>.xlsx --kind villages
 
 Ajeer Codes written `/2`, `/3` … are **held**: never imported, listed on the report sheet
 "Code 2, 3 - rukay hue" until the CTO decides their mapping.
+
+## Initial passwords (CTO 7 Nov 2026)
+
+- A **newly created** account gets the initial password `demo1234`, stored only as a bcrypt hash
+  (cost 10), with `mustChangePassword: true`. New accounts come from the HR import (set only with
+  `$setOnInsert`) or, for a Pakistan Admin, from central provisioning; a supervisor reset sets it again.
+- Until the password is changed, every protected API answers `403 PASSWORD_CHANGE_REQUIRED`; only
+  `/auth/me`, `/auth/change-password` and `/auth/logout` stay open. The new password may not be
+  `demo1234` or the Ajeer Code and needs at least 6 characters. Then normal role-based access applies.
+- A repeated HR import never sets, resets or re-hashes the password of an existing account.
+- Covered for every role (zimmedar, district, division, suba, pakistan) by
+  `src/modules/auth/first-login-roles.test.ts`.
