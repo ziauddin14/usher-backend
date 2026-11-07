@@ -17,7 +17,14 @@ export type ErrorCode =
   | 'CONFLICT'
   | 'JADWAL_LOCKED'
   | 'RATE_LIMITED'
+  | 'DB_UNAVAILABLE'
   | 'INTERNAL';
+
+/** The MongoDB driver could not reach the database (server down, wrong URI, network). */
+function isDbUnavailable(err: unknown): boolean {
+  const name = err instanceof Error ? err.name : '';
+  return /^Mongo(ose)?(ServerSelection|Network|NetworkTimeout|TopologyClosed)Error$/.test(name);
+}
 
 export class AppError extends Error {
   constructor(
@@ -61,6 +68,14 @@ export const errorHandler: ErrorRequestHandler = (err: unknown, _req, res, _next
   // Malformed JSON body from express.json()
   if (err instanceof SyntaxError && 'status' in err && err.status === 400) {
     res.status(400).json({ error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } });
+    return;
+  }
+  // No database: a clear 503 (the screens say "server is not reachable"), not a generic 500.
+  if (isDbUnavailable(err)) {
+    console.error(`[db] database not reachable: ${(err as Error).name}`);
+    res
+      .status(503)
+      .json({ error: { code: 'DB_UNAVAILABLE', message: 'Database is not reachable' } });
     return;
   }
   console.error(err);
