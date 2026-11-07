@@ -2,19 +2,10 @@ import { Router } from 'express';
 import { currentUser, requireAuth, requireRole, SUPERVISOR_ROLES } from '../../lib/auth.js';
 import { parse } from '../../lib/errors.js';
 import { listUsersQuery, statusSchema, userIdParams } from './schemas.js';
-import {
-  confirmMobile,
-  confirmMobileChange,
-  rejectMobileChange,
-  viewMobileChange,
-  listResetRequests,
-  listUsers,
-  rejectMobile,
-  viewPendingMobile,
-  resetPassword,
-  setUserStatus,
-} from './service.js';
+import { listResetRequests, listUsers, resetPassword, setUserStatus } from './service.js';
 
+// Supervisors: users below them, forgot-password requests, password reset, activate / deactivate.
+// (No mobile verification any more — CTO 7 Nov 2026.)
 export function usersRouter(): Router {
   const router = Router();
   router.use(requireAuth, requireRole(...SUPERVISOR_ROLES));
@@ -31,44 +22,6 @@ export function usersRouter(): Router {
   router.post('/:id/reset-password', async (req, res) => {
     const { id } = parse(userIdParams, req.params);
     await resetPassword(currentUser(req), id);
-    res.json({ ok: true });
-  });
-
-  router.post('/:id/confirm-mobile', async (req, res) => {
-    const { id } = parse(userIdParams, req.params);
-    await confirmMobile(currentUser(req), id);
-    res.json({ ok: true });
-  });
-
-  // Full pending number for the District (audited); never cached by the browser.
-  router.get('/:id/pending-mobile', async (req, res) => {
-    const { id } = parse(userIdParams, req.params);
-    const mobile = await viewPendingMobile(currentUser(req), id);
-    res.set('Cache-Control', 'no-store').json({ mobile });
-  });
-
-  router.post('/:id/reject-mobile', async (req, res) => {
-    const { id } = parse(userIdParams, req.params);
-    await rejectMobile(currentUser(req), id);
-    res.json({ ok: true });
-  });
-
-  // A later mobile change (same verifier hierarchy as a first-login number).
-  router.get('/:id/pending-mobile-change', async (req, res) => {
-    const { id } = parse(userIdParams, req.params);
-    const mobile = await viewMobileChange(currentUser(req), id);
-    res.set('Cache-Control', 'no-store').json({ mobile });
-  });
-
-  router.post('/:id/confirm-mobile-change', async (req, res) => {
-    const { id } = parse(userIdParams, req.params);
-    await confirmMobileChange(currentUser(req), id);
-    res.json({ ok: true });
-  });
-
-  router.post('/:id/reject-mobile-change', async (req, res) => {
-    const { id } = parse(userIdParams, req.params);
-    await rejectMobileChange(currentUser(req), id);
     res.json({ ok: true });
   });
 

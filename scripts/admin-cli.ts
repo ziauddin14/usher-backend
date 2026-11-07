@@ -1,4 +1,4 @@
-// Shared by the central admin commands (designate:verifier, provision:pakistan-admin): the operator
+// Shared by the central admin commands (provision:pakistan-admin, pakistan-admin:status): the operator
 // always names the database (--db demo|live) and confirms it by name (--confirm=<database name>).
 import { connectDb } from '../src/lib/db.js';
 import { adminTargetUri, dbNameOf } from '../src/lib/databases.js';

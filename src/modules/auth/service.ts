@@ -13,8 +13,6 @@ import { INITIAL_PASSWORD } from './schemas.js';
 export const BCRYPT_COST = 10;
 
 export interface PublicUser {
-  /** Designated permissions (e.g. VERIFY_SUBA_MOBILE) — the UI shows the matching actions. */
-  permissions: string[];
   /** Department of a centrally provisioned account (CENTRAL_IT), else absent. */
   department?: string;
   id: string;
@@ -56,24 +54,17 @@ export async function publicUser(user: AuthUser): Promise<PublicUser> {
       level: unit.level,
     },
     mustChangePassword: user.mustChangePassword,
-    permissions: user.permissions ?? [],
     ...(user.department ? { department: user.department } : {}),
   };
 }
 
 /**
- * Check Ajeer Code + password. While the user still has the initial password
- * (mustChangePassword) the registered mobile must match too.
- * A self-entered mobile (no number on record) is saved as "tasdeeq baqi" and the login stops with
- * 403 MOBILE_PENDING until the District confirms it (CTO 5 Nov 2026) — no session before that.
- * Every attempt is audit-logged (never the password, never the full mobile).
+ * Check Ajeer Code + password — nothing else (CTO 7 Nov 2026: no mobile step, no verification).
+ * With the initial password (mustChangePassword) the session is issued but every endpoint except
+ * me / change-password answers 403 PASSWORD_CHANGE_REQUIRED until the password is changed.
+ * Every attempt is audit-logged (never the password).
  */
-export async function login(
-  ajeerCode: string,
-  password: string,
-  mobile: string | undefined,
-  ip: string | undefined,
-) {
+export async function login(ajeerCode: string, password: string, ip: string | undefined) {
   await connectDb();
   const user = await User.findOne({ ajeerCode }).select('+passwordHash').lean();
   // Compare against a dummy hash for unknown codes too, so the answer time does not tell
@@ -95,52 +86,6 @@ export async function login(
   if (!user.isActive) {
     throw new AppError(403, 'ACCOUNT_INACTIVE', 'This account is not active');
   }
-  if (user.mustChangePassword) {
-    if (!mobile) {
-      throw new AppError(401, 'MOBILE_REQUIRED', 'Enter your registered mobile number');
-    }
-    const typed = normalizeMobile(mobile);
-    if (!typed) {
-      throw new AppError(
-        400,
-        'VALIDATION_FAILED',
-        'Mobile is not a valid Pakistani mobile number',
-        {
-          field: 'mobile',
-        },
-      );
-    }
-    if (!user.mobile) {
-      // No number on record: keep the one the user typed, "tasdeeq baqi" until the District
-      // confirms. Only into an empty slot — a number saved meanwhile is never replaced.
-      const saved = await User.updateOne(
-        { _id: user._id, mobile: { $exists: false } },
-        { $set: { mobile: typed, mobileVerified: false } },
-      );
-      if (saved.modifiedCount === 0) {
-        await failed('mobile_mismatch');
-        throw new AppError(401, 'MOBILE_MISMATCH', 'Mobile number does not match');
-      }
-      await audit({
-        action: 'MOBILE_SELF_REGISTER',
-        actorId: String(user._id),
-        actorAjeerCode: user.ajeerCode,
-        targetType: 'user',
-        targetId: String(user._id),
-        unitPath: user.unitPath,
-        details: { mobile: maskMobile(typed) },
-      });
-      throw mobilePending();
-    } else if (typed !== user.mobile) {
-      await failed('mobile_mismatch');
-      throw new AppError(401, 'MOBILE_MISMATCH', 'Mobile number does not match');
-    }
-  }
-  if (user.mobileVerified === false) {
-    await failed('mobile_pending');
-    throw mobilePending();
-  }
-
   await User.updateOne({ _id: user._id }, { $set: { lastLoginAt: new Date() } });
   await audit({
     action: 'LOGIN',
@@ -161,7 +106,6 @@ export async function login(
     unitPath: user.unitPath,
     mustChangePassword: user.mustChangePassword,
     sessionVersion: user.sessionVersion ?? 0,
-    permissions: user.permissions ?? [],
     ...(user.department ? { department: user.department } : {}),
   };
   return authUser;
@@ -170,9 +114,6 @@ export async function login(
 let dummy: Promise<string> | undefined;
 /** A bcrypt hash of nothing anybody can type, made once per instance. */
 const dummyHash = () => (dummy ??= bcrypt.hash(`no-user-${Math.random()}`, BCRYPT_COST));
-
-const mobilePending = () =>
-  new AppError(403, 'MOBILE_PENDING', 'Mobile number waits for District confirmation');
 
 export async function changePassword(
   user: AuthUser,
@@ -218,10 +159,11 @@ export async function changePassword(
 export async function requestPasswordReset(ajeerCode: string, mobile: string): Promise<void> {
   await connectDb();
   const user = await User.findOne({ ajeerCode, isActive: true })
-    .select('ajeerCode name nameUr role unitCode unitPath mobile mobileVerified')
+    .select('ajeerCode name nameUr role unitCode unitPath mobile')
     .lean();
-  // A self-entered number still waiting for the District is not a registered number.
-  if (!user?.mobile || user.mobileVerified === false) return;
+  // The profile mobile identifies the request. Without one, the user asks a supervisor, who can
+  // reset any user below them from the dashboard.
+  if (!user?.mobile) return;
   if (normalizeMobile(mobile) !== user.mobile) return;
 
   const existing = await PasswordResetRequest.exists({ userId: user._id, status: 'pending' });
@@ -274,73 +216,43 @@ export async function resetToInitialPassword(
 }
 
 /**
- * POST /auth/mobile-change { mobile } — the user asks to replace their registered mobile (CTO
- * 7 Nov 2026). The current number keeps working (login, forgot password) until the user's
- * verifier — the same hierarchy as a first-login number (assertVerifierOf) — confirms the new
- * one. A new request replaces an open one. Audit MOBILE_CHANGE_REQUEST (number masked).
+ * PUT /auth/mobile { mobile } — the user sets, changes or (empty / null) removes their own optional
+ * mobile at once (CTO 7 Nov 2026: no approval, no verification). Audit MOBILE_UPDATE with both
+ * numbers masked.
  */
-export async function requestMobileChange(user: AuthUser, mobile: string): Promise<void> {
+export async function updateOwnMobile(
+  user: AuthUser,
+  mobile: string | null,
+): Promise<string | null> {
   await connectDb();
-  const typed = normalizeMobile(mobile);
-  if (!typed) {
+  const next = mobile?.trim() ? normalizeMobile(mobile) : null;
+  if (mobile?.trim() && !next) {
     throw new AppError(400, 'VALIDATION_FAILED', 'Mobile is not a valid Pakistani mobile number', {
       field: 'mobile',
     });
   }
-  const doc = await User.findById(user.id).select('mobile mobileVerified').lean();
-  if (!doc?.mobile || doc.mobileVerified === false) {
-    throw new AppError(409, 'CONFLICT', 'There is no confirmed mobile number to change yet');
-  }
-  if (doc.mobile === typed) {
-    throw new AppError(400, 'VALIDATION_FAILED', 'This is already your registered number', {
-      field: 'mobile',
-      reason: 'SAME_MOBILE',
-    });
-  }
+  const doc = await User.findById(user.id).select('mobile').lean();
+  const before = doc?.mobile ?? null;
+  if (before === next) return maskMobile(next);
   await User.updateOne(
-    { _id: doc._id },
-    { $set: { mobileChange: { mobile: typed, requestedAt: new Date() } } },
+    { _id: user.id },
+    next ? { $set: { mobile: next } } : { $unset: { mobile: 1 } },
   );
   await audit({
-    action: 'MOBILE_CHANGE_REQUEST',
+    action: 'MOBILE_UPDATE',
     actorId: user.id,
     actorAjeerCode: user.ajeerCode,
     targetType: 'user',
     targetId: user.id,
     unitPath: user.unitPath,
-    details: { from: maskMobile(doc.mobile), to: maskMobile(typed) },
+    details: { from: maskMobile(before), to: maskMobile(next) },
   });
+  return maskMobile(next);
 }
 
-/** DELETE /auth/mobile-change — the user withdraws an open request. Audit MOBILE_CHANGE_CANCEL. */
-export async function cancelMobileChange(user: AuthUser): Promise<void> {
-  await connectDb();
-  const doc = await User.findOneAndUpdate(
-    { _id: user.id, mobileChange: { $exists: true } },
-    { $unset: { mobileChange: 1 } },
-  )
-    .select('mobileChange')
-    .lean();
-  if (!doc?.mobileChange) return;
-  await audit({
-    action: 'MOBILE_CHANGE_CANCEL',
-    actorId: user.id,
-    actorAjeerCode: user.ajeerCode,
-    targetType: 'user',
-    targetId: user.id,
-    unitPath: user.unitPath,
-    details: { to: maskMobile(doc.mobileChange.mobile) },
-  });
-}
-
-/** The caller's own mobile (masked) and an open change request, for the profile screens. */
+/** GET /auth/mobile — the caller's own mobile, masked, for the profile screens. */
 export async function ownMobile(user: AuthUser) {
   await connectDb();
-  const doc = await User.findById(user.id).select('mobile mobileChange').lean();
-  return {
-    mobile: maskMobile(doc?.mobile),
-    mobileChange: doc?.mobileChange
-      ? { mobile: maskMobile(doc.mobileChange.mobile), requestedAt: doc.mobileChange.requestedAt }
-      : null,
-  };
+  const doc = await User.findById(user.id).select('mobile').lean();
+  return { mobile: maskMobile(doc?.mobile) };
 }

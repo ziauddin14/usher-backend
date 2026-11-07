@@ -12,8 +12,6 @@ const ajeerCode = z
 export const loginSchema = z.object({
   ajeerCode,
   password: z.string().min(1).max(128),
-  /** Required while the user still has the initial password (mustChangePassword). */
-  mobile: z.string().trim().max(20).optional(),
 });
 
 export const changePasswordSchema = z.object({
@@ -29,4 +27,5 @@ export const forgotPasswordSchema = z.object({
   mobile: z.string().trim().min(1).max(20),
 });
 
-export const mobileChangeSchema = z.object({ mobile: z.string().trim().min(1).max(20) });
+/** Own optional mobile: a number to set / change it, '' or null to remove it. */
+export const updateMobileSchema = z.object({ mobile: z.string().trim().max(20).nullable() });

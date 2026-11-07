@@ -47,7 +47,7 @@ export function assertDemoDb(uri: string): void {
 }
 
 /**
- * Database for an admin CLI that changes one account (e.g. `designate:verifier`): the operator
+ * Database for an admin CLI that changes one account (e.g. `provision:pakistan-admin`): the operator
  * names the target explicitly — `demo` = MONGODB_URI, only a demo/test database; `live` = the live
  * database (same rule as the imports). Throws for anything else, so the shell's MONGODB_URI can
  * never be written to by accident.

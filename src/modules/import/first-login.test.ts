@@ -1,5 +1,5 @@
 // End to end with invented rows: an HR-imported employee logs in with Ajeer Code + the initial
-// password (+ the registered mobile), is held at "change password" by the API itself, and gets
+// password only (no mobile, CTO 7 Nov 2026), is held at "change password" by the API itself, and gets
 // normal role-based access only after the change.
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -43,15 +43,8 @@ describe('HR import → first login → forced password change', () => {
   it('works only in this order, enforced by the API', async () => {
     expect(INITIAL_PASSWORD).toBe('demo1234');
     const login = (body: object) => request(app).post('/api/v1/auth/login').send(body);
-    // The registered (HR) mobile is asked for while the initial password is still in use.
-    expect(
-      (await login({ ajeerCode: '870001', password: 'demo1234' }).expect(401)).body.error.code,
-    ).toBe('MOBILE_REQUIRED');
-    const ok = await login({
-      ajeerCode: '870001',
-      password: 'demo1234',
-      mobile: '0300 1119900',
-    }).expect(200);
+    // Ajeer Code + initial password are enough — no mobile step.
+    const ok = await login({ ajeerCode: '870001', password: 'demo1234' }).expect(200);
     expect(ok.body.user.mustChangePassword).toBe(true);
     const cookie = (ok.headers['set-cookie'] as unknown as string[])[0]!.split(';')[0]!;
 
@@ -80,7 +73,7 @@ describe('HR import → first login → forced password change', () => {
     await request(app).get('/api/v1/me/summary').set('Cookie', cookie).expect(200);
     // Role-based access stays: a zimmedar cannot open supervisor endpoints.
     await request(app).get('/api/v1/users').set('Cookie', cookie).expect(403);
-    // The next login needs only the new password (no mobile step any more).
+    // The next login needs only the new password.
     await login({ ajeerCode: '870001', password: 'apna-naya-1' }).expect(200);
     await login({ ajeerCode: '870001', password: 'demo1234' }).expect(401);
   });

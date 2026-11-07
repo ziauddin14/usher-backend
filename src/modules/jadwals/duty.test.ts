@@ -12,7 +12,6 @@ import { User } from '../../models/user.js';
 import { seedHistory } from '../../seed/history.js';
 import { seedDemo } from '../../seed/seed.js';
 import { percent } from '../dash/service.js';
-import { setPermission } from '../users/permissions.js';
 import { assertDutyApprover } from './duty.js';
 
 // Official-duty approval of a full-day mashwara (CTO 6 Nov 2026). Invented demo data only.
@@ -150,13 +149,6 @@ describe('official-duty approval of a full-day mashwara', () => {
   });
 
   it('only the level directly above decides — never the owner, a peer, a higher level or another district', async () => {
-    // The mobile-verification permission grants nothing here.
-    await setPermission({
-      ajeerCode: '9010001',
-      permission: 'VERIFY_SUBA_MOBILE',
-      grant: true,
-      actor: 'test',
-    });
     await decide(mashwaraId, '9090412', 'approve').expect(403); // the owner (self)
     await decide(mashwaraId, 'peer', 'approve').expect(403); // same level
     await decide(mashwaraId, '9030001', 'approve').expect(403); // two levels up
@@ -440,7 +432,6 @@ describe('assertDutyApprover', () => {
     unitCode: 'X',
     unitPath: 'PK',
     mustChangePassword: false,
-    permissions: ['VERIFY_SUBA_MOBILE', 'VERIFY_PAKISTAN_MOBILE'],
     department: 'CENTRAL_IT',
   });
   const owner = (id: string, role: AuthUser['role']) => ({ _id: id, role });
@@ -458,7 +449,7 @@ describe('assertDutyApprover', () => {
     expect(() => assertDutyApprover(caller('a', 'division'), owner('b', 'zimmedar'))).toThrow(
       /directly above/,
     );
-    // Designated permissions / department do not make anyone an approver.
+    // A department does not make anyone an approver.
     expect(() => assertDutyApprover(caller('a', 'pakistan'), owner('b', 'suba'))).toThrow(
       /No official-duty approver/,
     );

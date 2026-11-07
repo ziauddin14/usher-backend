@@ -99,13 +99,11 @@ export async function importMobiles(
     if (!user) {
       problems.push({ row, ajeerCode, mobile, message: 'No imported user with this Ajeer Code' });
     } else if (isCentrallyManaged(user)) {
-      // CTO 6 Nov 2026: a Pakistan Admin's mobile is typed at the first login and verified only
-      // by the designated Central IT verifier — never filled or verified by an import.
+      // CTO 6 Nov 2026: no import ever changes a centrally provisioned Pakistan Admin account.
       problems.push({
         row,
         ajeerCode,
-        message:
-          'Centrally provisioned Pakistan Admin account — its mobile is verified only by the Central IT verifier',
+        message: 'Centrally provisioned Pakistan Admin account — never changed by an import',
       });
     } else if (!user.mobile) {
       set.push({ ajeerCode, mobile });
@@ -122,7 +120,7 @@ export async function importMobiles(
         updateOne: {
           // Only while still empty, so a number typed meanwhile is never replaced.
           filter: { ajeerCode, mobile: { $exists: false }, ...NOT_CENTRALLY_MANAGED },
-          update: { $set: { mobile, mobileVerified: true } },
+          update: { $set: { mobile } },
         },
       })),
     );

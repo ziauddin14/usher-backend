@@ -521,7 +521,7 @@ export async function importEmployees(
               },
             },
             // Never touched here: password, mustChangePassword (except for a new account),
-            // isActive, mobile / mobileVerified / mobileChange, permissions, department.
+            // isActive, a mobile on record, department.
             ...(row.zimmedari ? {} : { $unset: { zimmedari: '' } }),
             // Only for new users: first password (INITIAL_PASSWORD) + forced change. Existing passwords stay.
             $setOnInsert: {
@@ -547,7 +547,7 @@ export async function importEmployees(
               mobile: { $exists: false },
               ...NOT_CENTRALLY_MANAGED,
             },
-            update: { $set: { mobile: row.mobile, mobileVerified: true } },
+            update: { $set: { mobile: row.mobile } },
           },
         })),
       );
