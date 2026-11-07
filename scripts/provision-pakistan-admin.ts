@@ -7,7 +7,7 @@
 // --nomination = the central management authority's nomination; --approval = its confirmation by
 // the authorized administrative process (two different documents). --central-it marks a Central IT
 // Department account (needed before VERIFY_PAKISTAN_MOBILE can be designated). The account gets
-// the pakistan role, password 123 with a forced change, no permission and no mobile: the person
+// the pakistan role, password demo1234 with a forced change, no permission and no mobile: the person
 // types the mobile at the first login, and it waits for the designated Central IT verifier.
 // Creates only — an existing ajeer code is refused, never promoted. Audit USER_PROVISION.
 import { disconnectDb } from '../src/lib/db.js';
@@ -50,7 +50,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   console.warn(
-    'Done (audited). Password 123 with a forced change; no permission; the mobile is typed at the first login and waits for the designated Central IT verifier.',
+    'Done (audited). Password demo1234 with a forced change; no permission; the mobile is typed at the first login and waits for the designated Central IT verifier.',
   );
   await disconnectDb();
 }

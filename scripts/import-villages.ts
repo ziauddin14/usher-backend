@@ -1,4 +1,4 @@
-// pnpm import:villages private/<file>.xlsx [--dry-run]     (run AFTER pnpm import:employees)
+// pnpm import:villages private/<file>.xlsx --dry-run | --operator "<who>" --confirm=ushr_live     (run AFTER pnpm import:employees)
 // Columns: Gaon ka naam, Tehsil, District, Zimmedar Ajeer Code (or the zimmedar's name).
 // Villages are upserted by district + normalized name (status "approved") and assigned to their
 // Ushar Zimmedar. Villages listed under a District/Division user go to the "district pool"
@@ -6,7 +6,8 @@
 // village sheet is read (never "Location"). Always writes to the live database (ushr_live).
 // Unmatched villages / no-name rows / pool / conflicts → Excel report in backend/private/.
 import { mkdir } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { basename, join } from 'node:path';
+import { parseImportArgs } from './import-args.js';
 import { disconnectDb } from '../src/lib/db.js';
 import { useLiveDb } from './live-db.js';
 import {
@@ -16,17 +17,10 @@ import {
 } from '../src/modules/import/villages.js';
 
 async function main(): Promise<void> {
-  const args = process.argv.slice(2);
-  const dryRun = args.includes('--dry-run');
-  const file = args.find((a) => !a.startsWith('--'));
-  if (!file) {
-    console.error('Usage: pnpm import:villages <file.xlsx> [--dry-run]');
-    process.exit(1);
-  }
+  const { dryRun, path, source } = parseImportArgs(process.argv.slice(2), 'import:villages');
 
   await useLiveDb({ dryRun });
-  const path = resolve(file);
-  const result = await importVillages(await readVillageSheet(path), { dryRun });
+  const result = await importVillages(await readVillageSheet(path), { dryRun, source });
 
   const privateDir = join(process.cwd(), 'private');
   await mkdir(privateDir, { recursive: true });

@@ -6,6 +6,8 @@ import ExcelJS from 'exceljs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { User } from '../../models/user.js';
 import { Village } from '../../models/village.js';
+import { AuditLog } from '../../models/audit-log.js';
+import { assignVillage, mergeVillage, updateVillage } from '../villages/manage.js';
 import { seedDemo } from '../../seed/seed.js';
 import { importVillages, readVillageSheet, writeVillageReport } from './villages.js';
 
@@ -141,8 +143,61 @@ describe('village import', () => {
       'District pool',
       'Zimmedar nahi mila',
       'Aik gaon, kai zimmedar',
+      'Assignment barqarar',
+      'Purane naam se mila',
     ]);
     expect(wb.getWorksheet('Gaon nahi mile')!.rowCount).toBe(2);
     expect(wb.getWorksheet('Bina naam')!.rowCount).toBe(2);
+  });
+
+  it('new villages record their source; a real run is audited (counts only)', async () => {
+    const naya = await Village.findOne({ nameKey: 'نیا گاؤں', districtCode: 'GHOTKI' }).lean();
+    expect(naya?.source).toMatchObject({ kind: 'import', row: 2 });
+    await importVillages(await readVillageSheet(file), {
+      dryRun: false,
+      source: { file: 'gaon-list.xlsx', operator: 'cli:test' },
+    });
+    const log = await AuditLog.findOne({ action: 'IMPORT_VILLAGES' }).sort({ at: -1 }).lean();
+    expect(log).toMatchObject({
+      actorAjeerCode: 'cli:test',
+      details: { file: 'gaon-list.xlsx', created: 0, updated: 6 },
+    });
+  });
+
+  it('a repeated import keeps the District reassignment, rename and merge (no duplicates)', async () => {
+    const district = await User.findOne({ ajeerCode: '9040001' }).lean();
+    const caller = {
+      id: String(district!._id),
+      ajeerCode: district!.ajeerCode,
+      name: district!.name,
+      role: district!.role,
+      unitCode: district!.unitCode,
+      unitPath: district!.unitPath,
+      mustChangePassword: false,
+    };
+    const other = await User.findOne({ ajeerCode: otherCode }).lean();
+    const naya = await Village.findOne({ nameKey: 'نیا گاؤں', districtCode: 'GHOTKI' }).lean();
+    await assignVillage(caller, String(naya!._id), String(other!._id));
+    const byName = await Village.findOne({ nameKey: 'نام سے' }).lean();
+    await updateVillage(caller, String(byName!._id), { name: 'گوٹھ نام سے درست' });
+    const pool = await Village.findOne({ nameKey: 'ضلعی' }).lean();
+    const beNaam = await Village.findOne({ nameKey: 'بے نام' }).lean();
+    await mergeVillage(caller, String(beNaam!._id), String(pool!._id));
+    const live = await Village.countDocuments({ status: { $in: ['approved', 'pending'] } });
+
+    const result = await importVillages(await readVillageSheet(file), { dryRun: false });
+    expect(result.created).toBe(0);
+    expect(await Village.countDocuments({ status: { $in: ['approved', 'pending'] } })).toBe(live);
+    expect(String((await Village.findById(naya!._id).lean())!.assignedTo)).toBe(String(other!._id));
+    expect(result.assignmentKept).toEqual([
+      expect.objectContaining({
+        village: 'گوٹھ نیا گاؤں',
+        inFile: expect.stringContaining('9090412'),
+      }),
+    ]);
+    expect(result.formerNameMatches.map((m) => m.village).sort()).toEqual(
+      ['گوٹھ نام سے درست', 'گوٹھ ضلعی'].sort(),
+    );
+    expect((await Village.findById(beNaam!._id).lean())!.status).toBe('merged');
   });
 });

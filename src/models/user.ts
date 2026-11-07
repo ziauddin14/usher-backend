@@ -45,6 +45,27 @@ const userSchema = new Schema(
     fatherName: { type: String },
     /** Registered mobile, normalized 03XXXXXXXXX — checked on first login and forgot-password. */
     mobile: { type: String, match: /^03\d{9}$/ },
+    /**
+     * A later change of the registered mobile, asked for by the user (CTO 7 Nov 2026). The current
+     * number keeps working until the user's verifier (the same hierarchy as a first-login number)
+     * confirms the new one; reject or cancel removes it. Imports never touch it.
+     */
+    mobileChange: {
+      type: new Schema(
+        {
+          mobile: { type: String, required: true, match: /^03\d{9}$/ },
+          requestedAt: { type: Date, required: true },
+        },
+        { _id: false },
+      ),
+    },
+    /** Last HR import that touched this account: file name (no folder), row and time. */
+    hrImport: {
+      type: new Schema(
+        { file: { type: String }, row: { type: Number }, at: { type: Date, required: true } },
+        { _id: false },
+      ),
+    },
     /** false = typed by the user at the first login, waiting for its verifier to confirm ("tasdeeq baqi"). */
     mobileVerified: { type: Boolean },
     role: { type: String, enum: ROLES, required: true },

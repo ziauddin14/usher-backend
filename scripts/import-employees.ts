@@ -1,11 +1,12 @@
-// pnpm import:employees private/<file>.xlsx [--dry-run]
+// pnpm import:employees private/<file>.xlsx --dry-run | --operator "<who>" --confirm=ushr_live
 // Columns: Ajeer Code, Naam, Walid, Zimmedari (Ushar/Tehsil-Town/Event/District/Division/Suba),
 //          Suba, Division, District, Mobile.
 // Upsert by Ajeer Code · new units created · existing passwords never changed · new users get
-// password 123 + forced change. Always writes to the live database (ushr_live). An Excel report
+// password demo1234 + forced change. Always writes to the live database (ushr_live). An Excel report
 // (rejected rows, warnings, codes written as /1 and /2) is saved in backend/private/ (git-ignored).
 import { mkdir } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { basename, join } from 'node:path';
+import { parseImportArgs } from './import-args.js';
 import { disconnectDb } from '../src/lib/db.js';
 import { useLiveDb } from './live-db.js';
 import {
@@ -15,18 +16,11 @@ import {
 } from '../src/modules/import/employees.js';
 
 async function main(): Promise<void> {
-  const args = process.argv.slice(2);
-  const dryRun = args.includes('--dry-run');
-  const file = args.find((a) => !a.startsWith('--'));
-  if (!file) {
-    console.error('Usage: pnpm import:employees <file.xlsx> [--dry-run]');
-    process.exit(1);
-  }
+  const { dryRun, path, source } = parseImportArgs(process.argv.slice(2), 'import:employees');
 
   await useLiveDb({ dryRun });
-  const path = resolve(file);
   const rows = await readEmployeeSheet(path);
-  const result = await importEmployees(rows, { dryRun });
+  const result = await importEmployees(rows, { dryRun, source });
 
   const privateDir = join(process.cwd(), 'private');
   await mkdir(privateDir, { recursive: true });

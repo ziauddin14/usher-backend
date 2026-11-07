@@ -1,6 +1,7 @@
 import mongoose, { type InferSchemaType, type Model, Schema } from 'mongoose';
 
 export const VILLAGE_STATUS = ['approved', 'pending', 'merged'] as const;
+export const VILLAGE_SOURCES = ['import', 'zimmedar', 'district'] as const;
 
 const villageSchema = new Schema(
   {
@@ -16,6 +17,37 @@ const villageSchema = new Schema(
     addedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     approvedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     approvedAt: { type: Date },
+    /** Where the record came from: the official list import, a zimmedar, or the District. */
+    source: {
+      type: new Schema(
+        {
+          kind: { type: String, enum: VILLAGE_SOURCES, required: true },
+          /** Import file name (no folder) and its row, for an imported village. */
+          file: { type: String },
+          row: { type: Number },
+          at: { type: Date, required: true },
+        },
+        { _id: false },
+      ),
+    },
+    /**
+     * Earlier spellings: renames, and names of duplicates merged into this one. A later import of
+     * the official list matches them, so a corrected or merged village never comes back twice.
+     */
+    formerNames: {
+      type: [
+        new Schema(
+          {
+            name: { type: String, required: true },
+            nameKey: { type: String, required: true },
+            at: { type: Date, required: true },
+            reason: { type: String, enum: ['rename', 'merge'], required: true },
+          },
+          { _id: false },
+        ),
+      ],
+      default: undefined,
+    },
   },
   { timestamps: true },
 );
@@ -27,6 +59,7 @@ villageSchema.index(
 );
 villageSchema.index({ addedBy: 1, status: 1 });
 villageSchema.index({ assignedTo: 1, status: 1 });
+villageSchema.index({ unitPath: 1, 'formerNames.nameKey': 1 });
 
 export type VillageDoc = InferSchemaType<typeof villageSchema>;
 

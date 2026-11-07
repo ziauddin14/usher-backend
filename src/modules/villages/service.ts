@@ -87,10 +87,11 @@ export async function listVillages(user: AuthUser, q?: string): Promise<VillageI
 export async function addVillage(user: AuthUser, name: string): Promise<VillageItem> {
   await connectDb();
   const nameKey = villageNameKey(name);
+  // Also an earlier spelling (renamed / merged): the zimmedar is shown the existing village.
   const existing = await Village.findOne({
     unitPath: user.unitPath,
-    nameKey,
     status: { $in: ['approved', 'pending'] as ('approved' | 'pending')[] },
+    $or: [{ nameKey }, { 'formerNames.nameKey': nameKey }],
   }).lean();
   if (existing) {
     throw new AppError(409, 'VILLAGE_EXISTS', 'A village with this name already exists', {
@@ -106,6 +107,7 @@ export async function addVillage(user: AuthUser, name: string): Promise<VillageI
     addedBy: new Types.ObjectId(user.id),
     // The adder is responsible for it until the District says otherwise.
     assignedTo: new Types.ObjectId(user.id),
+    source: { kind: 'zimmedar', at: new Date() },
   });
   await audit({
     action: 'VILLAGE_ADD',

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-/** First password of every imported / reset user (CTO decision 30 Oct 2026). */
-export const INITIAL_PASSWORD = '123';
+/** First password of every imported / reset user (CTO 7 Nov 2026: demo1234; was 123). */
+export const INITIAL_PASSWORD = 'demo1234';
 export const PASSWORD_MIN_LENGTH = 6;
 
 const ajeerCode = z
@@ -28,3 +28,5 @@ export const forgotPasswordSchema = z.object({
   ajeerCode,
   mobile: z.string().trim().min(1).max(20),
 });
+
+export const mobileChangeSchema = z.object({ mobile: z.string().trim().min(1).max(20) });

@@ -2,6 +2,7 @@
 // Upsert by Ajeer Code; new units are created on the fly; existing passwords are never touched,
 // and a mobile already on record is never replaced (differences go to the report, CTO 5 Nov 2026).
 import bcrypt from 'bcryptjs';
+import { audit } from '../../lib/audit.js';
 import { connectDb } from '../../lib/db.js';
 import { DistrictNames } from '../../lib/district-names.js';
 import ExcelJS from 'exceljs';
@@ -134,6 +135,19 @@ export interface ImportResult {
   otherSuffix: SameCodeGroup['rows'];
   /** Existing users whose file mobile differs from the one on record — the record is kept. */
   mobileConflicts: { row: number; ajeerCode: string; onRecord: string; inFile: string }[];
+  /**
+   * Existing accounts whose role, zimmedari or unit the file changes (HR is the source, so the
+   * change is applied) — listed so the dry run shows every change of access before the real run.
+   */
+  changes: { row: number; ajeerCode: string; field: string; from: string; to: string }[];
+}
+
+/** Who ran an import and from which file (kept on the accounts and in the audit log). */
+export interface ImportSource {
+  /** File name only — never a folder path. */
+  file: string;
+  /** The operator who ran it (e.g. "cli:<name>"), recorded as the audit actor. */
+  operator: string;
 }
 
 const clean = (s: string | undefined) => s?.replace(/\s+/g, ' ').trim() || undefined;
@@ -350,15 +364,20 @@ class UnitResolver {
 /** Plan and (unless dryRun) apply the import. New units get Roman names from district-names.csv. */
 export async function importEmployees(
   rows: RawRow[],
-  { dryRun, names = DistrictNames.load() }: { dryRun: boolean; names?: DistrictNames },
+  {
+    dryRun,
+    names = DistrictNames.load(),
+    source,
+  }: { dryRun: boolean; names?: DistrictNames; source?: ImportSource },
 ): Promise<ImportResult> {
   await connectDb();
   const plan = validateRows(rows);
+  const startedAt = new Date();
 
   const existing = new Map(
     (
       await User.find({ ajeerCode: { $in: plan.valid.map((r) => r.ajeerCode) } })
-        .select('ajeerCode isDemo mobile role department provisioned')
+        .select('ajeerCode isDemo mobile role zimmedari unitCode department provisioned')
         .lean()
     ).map((u) => [u.ajeerCode, u]),
   );
@@ -407,6 +426,28 @@ export async function importEmployees(
   }
   const fillsMobile = (row: ValidRow) => !!row.mobile && !existing.get(row.ajeerCode)?.mobile;
 
+  const changes: ImportResult['changes'] = [];
+  for (const { row, unit } of assignments) {
+    const known = existing.get(row.ajeerCode);
+    if (!known) continue;
+    const compare: [string, string | null | undefined, string | undefined][] = [
+      ['role', known.role, row.role],
+      ['zimmedari', known.zimmedari, row.zimmedari],
+      ['unit', known.unitCode, unit.code],
+    ];
+    for (const [field, from, to] of compare) {
+      if ((from ?? '') !== (to ?? '')) {
+        changes.push({
+          row: row.row,
+          ajeerCode: row.ajeerCode,
+          field,
+          from: from ?? '',
+          to: to ?? '',
+        });
+      }
+    }
+  }
+
   const result: ImportResult = {
     dryRun,
     rows: rows.length,
@@ -418,6 +459,7 @@ export async function importEmployees(
     sameCode: plan.sameCode,
     otherSuffix: plan.otherSuffix,
     mobileConflicts,
+    changes,
   };
   if (dryRun) return result;
 
@@ -454,9 +496,16 @@ export async function importEmployees(
               ...(row.zimmedari ? { zimmedari: row.zimmedari } : {}),
               unitCode: unit.code,
               unitPath: unit.path,
+              hrImport: {
+                ...(source ? { file: source.file } : {}),
+                row: row.row,
+                at: startedAt,
+              },
             },
+            // Never touched here: password, mustChangePassword (except for a new account),
+            // isActive, mobile / mobileVerified / mobileChange, permissions, department.
             ...(row.zimmedari ? {} : { $unset: { zimmedari: '' } }),
-            // Only for new users: first password 123 + forced change. Existing passwords stay.
+            // Only for new users: first password (INITIAL_PASSWORD) + forced change. Existing passwords stay.
             $setOnInsert: {
               passwordHash,
               mustChangePassword: true,
@@ -486,6 +535,22 @@ export async function importEmployees(
       );
     }
   }
+  // One audit entry per real run: counts only — no names, mobiles or passwords.
+  await audit({
+    action: 'IMPORT_EMPLOYEES',
+    actorAjeerCode: source?.operator ?? 'import',
+    targetType: 'import',
+    details: {
+      ...(source ? { file: source.file } : {}),
+      rows: result.rows,
+      created: result.created,
+      updated: result.updated,
+      newUnits: result.newUnits.length,
+      rejected: result.errors.length,
+      changes: result.changes.length,
+      mobileConflicts: result.mobileConflicts.length,
+    },
+  });
   return result;
 }
 
@@ -544,6 +609,11 @@ export async function writeEmployeeReport(result: ImportResult, file: string): P
     'Naye units',
     ['Level', 'Naam', 'Path'],
     result.newUnits.map((u) => [u.level, u.name, u.path]),
+  );
+  sheet(
+    'Tabdeeliyan',
+    ['Row', 'Ajeer code', 'Kya badla', 'Pehle', 'Ab'],
+    result.changes.map((c) => [c.row, c.ajeerCode, c.field, c.from, c.to]),
   );
   await wb.xlsx.writeFile(file);
 }
