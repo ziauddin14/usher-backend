@@ -1,0 +1,31 @@
+# dependencies
+node_modules/
+
+# env / secrets (keep .env.example)
+.env
+.env.*
+!.env.example
+
+# build output
+dist/
+*.tsbuildinfo
+coverage/
+
+# local data exports (scripts/backup.ts)
+backups/
+
+# real employee data — never commit (private/, spreadsheets anywhere)
+private/
+*.xlsx
+*.xls
+*.csv
+# Place names only (no people) — CTO approved committing this mapping (31 Oct 2026).
+!data/district-names.csv
+
+# OS / editors
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/*
+!.vscode/extensions.json

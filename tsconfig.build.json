@@ -1,0 +1,13 @@
+{
+  // Production build for Render: compiles src/ to dist/ (scripts/, tests and test helpers are not
+  // shipped). rootDir src keeps data/ one level above dist/, as src/lib/district-names.ts expects.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "dist",
+    "sourceMap": true
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
+}

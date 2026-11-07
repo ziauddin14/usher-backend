@@ -1,0 +1,32 @@
+# Render Blueprint — USHR API (Express 5 + MongoDB Atlas). No secrets in this file: every secret is
+# `sync: false` and is entered in the Render dashboard. Deploying needs separate CTO approval.
+services:
+  - type: web
+    name: ushr-api
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main
+    # pnpm comes from "packageManager" in package.json (corepack ships with Node 24).
+    # --prod=false: TypeScript and tsx are devDependencies but needed for the build.
+    buildCommand: corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm build
+    startCommand: pnpm start
+    healthCheckPath: /api/v1/health
+    autoDeploy: false
+    envVars:
+      - key: NODE_VERSION
+        value: 24
+      - key: NODE_ENV
+        value: production
+      # mongodb+srv://<user>:<password>@<cluster>/ushr_demo?retryWrites=true&w=majority
+      - key: MONGODB_URI
+        sync: false
+      # At least 32 random characters; Render generates one.
+      - key: JWT_SECRET
+        generateValue: true
+      # The Vercel origin of ushr-frontend, e.g. https://ushr-frontend.vercel.app (CORS allow-list).
+      - key: ALLOWED_ORIGIN
+        sync: false
+      # Vercel rewrite + Render proxy in front of the API (see src/lib/env.ts trustProxyHops).
+      - key: TRUST_PROXY_HOPS
+        value: 2

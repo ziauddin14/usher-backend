@@ -1,0 +1,5 @@
+# Keep LF line endings everywhere (Prettier checks endOfLine: lf); binaries untouched.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary

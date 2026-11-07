@@ -3,7 +3,7 @@
 import cookieParser from 'cookie-parser';
 import express, { type Express, type RequestHandler } from 'express';
 import helmet from 'helmet';
-import { env } from './lib/env.js';
+import { env, trustProxyHops } from './lib/env.js';
 import { errorHandler, notFoundHandler } from './lib/errors.js';
 import { authRouter } from './modules/auth/routes.js';
 import { healthRouter } from './modules/health/routes.js';
@@ -50,7 +50,7 @@ const dashTiming: RequestHandler = (req, res, next) => {
 
 export function createApp(): Express {
   const app = express();
-  app.set('trust proxy', 1);
+  app.set('trust proxy', trustProxyHops());
   app.disable('x-powered-by');
   app.use(helmet());
   app.use(cors);
