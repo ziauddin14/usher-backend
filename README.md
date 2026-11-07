@@ -72,9 +72,9 @@ pnpm import:villages  private/<gaon-file>.xlsx --operator "<who>" --confirm=ushr
 - A real run must name the operator and confirm the database by name; it writes one
   `IMPORT_EMPLOYEES` / `IMPORT_VILLAGES` audit entry (counts and file name only).
 - **Employees** — matched by Ajeer Code (`12345/1` → login `12345`). New accounts: password
-  `demo1234` + forced change (first login also asks the registered mobile). A repeated import never
-  changes a password, `mustChangePassword`, `isActive`, a mobile on record or its verification, an open
-  mobile change, permissions or a Pakistan Admin account; role / zimmedari / unit changes are applied
+  `demo1234` + forced change (login = Ajeer Code + password only). A repeated import never changes a
+  password, `mustChangePassword`, `isActive`, a mobile on record or a Pakistan Admin account;
+  role / zimmedari / unit changes are applied
   (HR is the source) and listed on the report sheet "Tabdeeliyan".
 - **Villages** — matched per district by normalized name, an earlier spelling or a merged duplicate;
   otherwise created (`source: import`, file, row). A village already given to a zimmedar keeps its
@@ -83,20 +83,22 @@ pnpm import:villages  private/<gaon-file>.xlsx --operator "<who>" --confirm=ushr
 Columns read (header text; case, spaces and punctuation ignored): see `COLUMNS` in
 `src/modules/import/employees.ts` and `src/modules/import/villages.ts`.
 
-## District Gaon management and mobile changes (API)
+## District Gaon management and own mobile (API)
 
-| Endpoint                                                                                           | Who                                                               | What                                                                                       |
-| -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `POST /villages/manage` `{ name, districtCode?, assignTo? }`                                       | district and above, in scope                                      | Add an approved village (409 `VILLAGE_EXISTS` with the existing one — assign that instead) |
-| `PATCH /villages/:id` `{ name?, tehsil? }`                                                         | district and above                                                | Correct spelling / tehsil; the old name stays in `formerNames`                             |
-| `GET /villages/duplicates?unit=`                                                                   | district and above                                                | Look-alike names in a district (suggestion only)                                           |
-| `POST /villages/:id/assign` · `/merge` · `/approve`                                                | district and above                                                | Assign / reassign, merge, approve (existing)                                               |
-| `GET /auth/mobile` · `POST`/`DELETE /auth/mobile-change`                                           | any user (password changed)                                       | Own masked number; ask for / withdraw a new number                                         |
-| `GET /users?mobileStatus=change`                                                                   | supervisors                                                       | Open mobile-change requests below them                                                     |
-| `GET /users/:id/pending-mobile-change` · `POST …/confirm-mobile-change` · `…/reject-mobile-change` | the user's verifier only (same hierarchy as a first-login number) | View (audited) / confirm / reject                                                          |
+| Endpoint                                                     | Who                          | What                                                                                       |
+| ------------------------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------ |
+| `POST /villages/manage` `{ name, districtCode?, assignTo? }` | district and above, in scope | Add an approved village (409 `VILLAGE_EXISTS` with the existing one — assign that instead) |
+| `PATCH /villages/:id` `{ name?, tehsil? }`                   | district and above           | Correct spelling / tehsil; the old name stays in `formerNames`                             |
+| `GET /villages/duplicates?unit=`                             | district and above           | Look-alike names in a district (suggestion only)                                           |
+| `POST /villages/:id/assign` · `/merge` · `/approve`          | district and above           | Assign / reassign, merge, approve                                                          |
+| `GET /auth/mobile` · `PUT /auth/mobile` `{ mobile }`         | any user (password changed)  | Own optional mobile, masked; set / change / remove (`''` or `null`) at once                |
 
 All of them are audited (`VILLAGE_CREATE`, `VILLAGE_RENAME`, `VILLAGE_REASSIGN`, `VILLAGE_MERGE`,
-`MOBILE_CHANGE_REQUEST`, `…_CANCEL`, `…_VIEW`, `…_CONFIRM`, `…_REJECT`; numbers masked).
+`MOBILE_UPDATE` with masked numbers).
+
+**No mobile verification (CTO 7 Nov 2026):** login is Ajeer Code + password only; the mobile is an
+optional profile field the user changes without approval. A forgot-password request matches it; a
+user without one asks a supervisor, who can reset any user below them.
 
 **Gaon visibility (CTO 7 Nov 2026):** a zimmedar sees, searches and uses in a jadwal only the villages
 assigned to them. Pool villages and other zimmedaran's villages are never offered; the District

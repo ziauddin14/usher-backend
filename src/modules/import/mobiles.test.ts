@@ -23,7 +23,7 @@ async function addUser(ajeerCode: string, mobile?: string): Promise<void> {
     passwordHash: 'x',
     mustChangePassword: true,
     isDemo: false,
-    ...(mobile ? { mobile, mobileVerified: true } : {}),
+    ...(mobile ? { mobile } : {}),
   });
 }
 
@@ -67,11 +67,10 @@ describe('mobile import (KPI file)', () => {
     expect((await User.findOne({ ajeerCode: '770001' }).lean())?.mobile).toBeUndefined();
   });
 
-  it('sets only empty numbers, as verified', async () => {
+  it('sets only empty numbers (no verification flag any more)', async () => {
     await importMobiles(await readMobileSheet(file), { dryRun: false });
     expect(await User.findOne({ ajeerCode: '770001' }).lean()).toMatchObject({
       mobile: '03001110001',
-      mobileVerified: true,
     });
     expect((await User.findOne({ ajeerCode: '770003' }).lean())?.mobile).toBe('03001110003');
     expect((await User.findOne({ ajeerCode: '9090412' }).lean())?.mobile).toBe('03000000000');
@@ -131,7 +130,7 @@ describe('mobile import never fills or verifies a Pakistan Admin mobile (CTO 6 N
     const result = await importMobiles(await readMobileSheet(path), { dryRun: false });
     expect(result.set).toEqual([{ ajeerCode: '771002', mobile: '03001117002' }]);
     expect(result.problems.map((p) => p.ajeerCode)).toEqual(['771001', '771003', '771004']);
-    for (const p of result.problems) expect(p.message).toMatch(/Central IT/);
+    for (const p of result.problems) expect(p.message).toMatch(/never changed by an import/);
     const missing = result.stillMissing.map((u) => u.ajeerCode);
     for (const code of ['771001', '771003', '771004']) expect(missing).not.toContain(code);
     expect(
@@ -143,11 +142,10 @@ describe('mobile import never fills or verifies a Pakistan Admin mobile (CTO 6 N
     // The write filter refuses on its own too (in case an account changes during the import).
     const res = await User.updateOne(
       { ajeerCode: '771003', mobile: { $exists: false }, ...NOT_CENTRALLY_MANAGED },
-      { $set: { mobile: '03001117003', mobileVerified: true } },
+      { $set: { mobile: '03001117003' } },
     );
     expect(res.matchedCount).toBe(0);
     const admin = await User.findOne({ ajeerCode: '771001' }).lean();
     expect(admin!.mobile).toBeUndefined();
-    expect(admin!.mobileVerified).toBeUndefined();
   });
 });

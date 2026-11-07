@@ -15,23 +15,12 @@ export const ROLE_RANK: Record<Role, number> = {
 export const ZIMMEDARI = ['ushar', 'tehsil_town', 'event'] as const;
 
 /**
- * Explicit, designated permissions (CTO decisions of 5–6 Nov 2026) — never implied by a role or a
- * department. Set only with scripts/designate-verifier.ts (audited USER_PERMISSION).
- * - VERIFY_SUBA_MOBILE: a pakistan-level account designated to verify suba accounts' self-entered
- *   mobiles ("designated Pakistan Admin").
- * - VERIFY_PAKISTAN_MOBILE: the designated Central IT verifier — a pakistan-level account of the
- *   Central IT Department — verifies pakistan-level accounts' self-entered mobiles.
- */
-export const PERMISSIONS = ['VERIFY_SUBA_MOBILE', 'VERIFY_PAKISTAN_MOBILE'] as const;
-
-/**
  * Department of a centrally provisioned account (CTO 6 Nov 2026). Set only by the controlled
  * provisioning command (scripts/provision-pakistan-admin.ts, audited USER_PROVISION); never by an
- * import. Membership alone grants nothing.
+ * import. A record of where the account belongs — it grants nothing.
  */
 export const DEPARTMENTS = ['CENTRAL_IT'] as const;
 export type Department = (typeof DEPARTMENTS)[number];
-export type Permission = (typeof PERMISSIONS)[number];
 export type Zimmedari = (typeof ZIMMEDARI)[number];
 
 const userSchema = new Schema(
@@ -43,22 +32,11 @@ const userSchema = new Schema(
     nameUr: { type: String },
     /** Walid (father's name) from the employee list. */
     fatherName: { type: String },
-    /** Registered mobile, normalized 03XXXXXXXXX — checked on first login and forgot-password. */
-    mobile: { type: String, match: /^03\d{9}$/ },
     /**
-     * A later change of the registered mobile, asked for by the user (CTO 7 Nov 2026). The current
-     * number keeps working until the user's verifier (the same hierarchy as a first-login number)
-     * confirms the new one; reject or cancel removes it. Imports never touch it.
+     * Optional profile mobile, normalized 03XXXXXXXXX. No verification (CTO 7 Nov 2026): the user
+     * sets or changes it themselves; never needed to log in. A forgot-password request matches it.
      */
-    mobileChange: {
-      type: new Schema(
-        {
-          mobile: { type: String, required: true, match: /^03\d{9}$/ },
-          requestedAt: { type: Date, required: true },
-        },
-        { _id: false },
-      ),
-    },
+    mobile: { type: String, match: /^03\d{9}$/ },
     /** Last HR import that touched this account: file name (no folder), row and time. */
     hrImport: {
       type: new Schema(
@@ -66,8 +44,6 @@ const userSchema = new Schema(
         { _id: false },
       ),
     },
-    /** false = typed by the user at the first login, waiting for its verifier to confirm ("tasdeeq baqi"). */
-    mobileVerified: { type: Boolean },
     role: { type: String, enum: ROLES, required: true },
     zimmedari: { type: String, enum: ZIMMEDARI },
     unitCode: { type: String, required: true },
@@ -77,12 +53,10 @@ const userSchema = new Schema(
     isActive: { type: Boolean, default: true },
     lastLoginAt: { type: Date },
     /**
-     * Bumped on a supervisor password reset (and a rejected mobile): every session token signed with
+     * Bumped on a supervisor password reset or a deactivation: every session token signed with
      * an older version stops working, so all logged-in devices must log in again.
      */
     sessionVersion: { type: Number, default: 0 },
-    /** Designated permissions (see PERMISSIONS); empty for almost everybody. */
-    permissions: { type: [{ type: String, enum: PERMISSIONS }], default: [] },
     /** Only on centrally provisioned accounts (see DEPARTMENTS). */
     department: { type: String, enum: DEPARTMENTS },
     /**
@@ -111,7 +85,7 @@ export type UserDoc = InferSchemaType<typeof userSchema>;
 
 /**
  * A pakistan-level or centrally provisioned account (CTO 6 Nov 2026): only Central IT's controlled
- * process creates or changes it, and only the designated Central IT verifier verifies its mobile.
+ * process creates or changes it.
  * No import (employees, mobiles) ever touches one.
  */
 export function isCentrallyManaged(u: {

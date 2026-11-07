@@ -22,7 +22,6 @@
     "import:villages": "tsx --env-file-if-exists=.env scripts/import-villages.ts",
     "import:mobiles": "tsx --env-file-if-exists=.env scripts/import-mobiles.ts",
     "inspect:file": "tsx scripts/inspect-import-file.ts",
-    "designate:verifier": "tsx --env-file-if-exists=.env scripts/designate-verifier.ts",
     "provision:pakistan-admin": "tsx --env-file-if-exists=.env scripts/provision-pakistan-admin.ts",
     "pakistan-admin:status": "tsx --env-file-if-exists=.env scripts/pakistan-admin-status.ts"
   },

@@ -12,11 +12,6 @@ export const AUDIT_ACTIONS = [
   'PASSWORD_RESET',
   'PASSWORD_RESET_REQUEST',
   'PASSWORD_CHANGE',
-  'MOBILE_SELF_REGISTER',
-  'MOBILE_CONFIRM',
-  'MOBILE_REJECT',
-  'MOBILE_VIEW',
-  'USER_PERMISSION',
   'USER_PROVISION',
   'MASHWARA_DUTY_APPROVE',
   'MASHWARA_DUTY_REJECT',
@@ -25,11 +20,8 @@ export const AUDIT_ACTIONS = [
   'IMPORT_VILLAGES',
   'VILLAGE_CREATE',
   'VILLAGE_RENAME',
-  'MOBILE_CHANGE_REQUEST',
-  'MOBILE_CHANGE_CANCEL',
-  'MOBILE_CHANGE_VIEW',
-  'MOBILE_CHANGE_CONFIRM',
-  'MOBILE_CHANGE_REJECT',
+  // Own mobile set, changed or removed by the user (no verification, CTO 7 Nov 2026).
+  'MOBILE_UPDATE',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

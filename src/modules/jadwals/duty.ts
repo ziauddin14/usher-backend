@@ -15,9 +15,8 @@ import { ROLE_RANK, type Role, User } from '../../models/user.js';
 /**
  * Who decides official duty for a mashwara, by the owner's role:
  *   zimmedar ← District · district ← Division · division ← Suba (the level directly above, in scope).
- *   suba / pakistan owners: no approver is authorized in Demo v1 (supervisors do not file jadwals;
- *   the CTO's suba ← designated Pakistan Admin and pakistan ← Central IT would need their own
- *   explicit permission first) → 403.
+ *   suba / pakistan owners: no approver is authorized in Demo v1 (supervisors do not file jadwals)
+ *   → 403.
  * Never self, never same level, never any other higher level.
  */
 export function assertDutyApprover(caller: AuthUser, owner: { _id: unknown; role: Role }): void {

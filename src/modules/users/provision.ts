@@ -3,8 +3,7 @@
 //   2. the nomination is confirmed through an authorized administrative process,
 //   3. Central IT creates the account by hand with scripts/provision-pakistan-admin.ts.
 // The account gets the pakistan role, the national unit, the initial password and a forced change —
-// and nothing else: no permission, no mobile (the person types it at the first login and it stays
-// "tasdeeq baqi" until the designated Central IT verifier confirms it). It never promotes an
+// and nothing else: no mobile (optional; the person adds it in their profile). It never promotes an
 // existing account, and no employee import can create or change a pakistan-level account.
 // Every creation is audited (USER_PROVISION) with both document references and the operator.
 import bcrypt from 'bcryptjs';
@@ -77,7 +76,6 @@ export async function provisionPakistanAdmin(input: ProvisionInput): Promise<Pro
     passwordHash: await bcrypt.hash(INITIAL_PASSWORD, BCRYPT_COST),
     mustChangePassword: true,
     isActive: true,
-    permissions: [],
     ...(input.department ? { department: input.department } : {}),
     provisioned: {
       nominationRef: input.nominationRef.trim(),
@@ -100,8 +98,6 @@ export async function provisionPakistanAdmin(input: ProvisionInput): Promise<Pro
       nominationRef: input.nominationRef.trim(),
       approvalRef: input.approvalRef.trim(),
       isActive: true,
-      permissions: [],
-      mobileVerified: null,
     },
   });
   return { ok: true, id: String(user._id), ajeerCode: input.ajeerCode };

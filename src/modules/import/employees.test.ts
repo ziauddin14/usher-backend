@@ -155,7 +155,6 @@ describe('employee import', () => {
     const one = await User.findOne({ ajeerCode: '880001' }).select('+passwordHash').lean();
     expect(one).toMatchObject({
       ajeerCodeFull: '880001/1',
-      mobileVerified: true,
       role: 'zimmedar',
       zimmedari: 'ushar',
       unitCode: 'GHOTKI',
@@ -194,12 +193,9 @@ describe('employee import', () => {
   });
 
   it('never overwrites a mobile on record; a different file number is reported', async () => {
-    // 880001 typed another number at the first login (pending); 880002 lost its number.
-    await User.updateOne(
-      { ajeerCode: '880001' },
-      { $set: { mobile: '03009998877', mobileVerified: false } },
-    );
-    await User.updateOne({ ajeerCode: '880002' }, { $unset: { mobile: '', mobileVerified: '' } });
+    // 880001 set another number in their profile; 880002 removed theirs.
+    await User.updateOne({ ajeerCode: '880001' }, { $set: { mobile: '03009998877' } });
+    await User.updateOne({ ajeerCode: '880002' }, { $unset: { mobile: '' } });
 
     const dry = await importEmployees(await readEmployeeSheet(file), { dryRun: true });
     expect(dry.mobileConflicts).toEqual([
@@ -213,18 +209,16 @@ describe('employee import', () => {
     expect(result.mobileConflicts.map((c) => c.ajeerCode)).toEqual(['880001']);
     expect(await User.findOne({ ajeerCode: '880001' }).lean()).toMatchObject({
       mobile: '03009998877',
-      mobileVerified: false,
     });
     // A missing number is still filled from the file.
     expect(await User.findOne({ ajeerCode: '880002' }).lean()).toMatchObject({
       mobile: '03001112244',
-      mobileVerified: true,
     });
   });
 
   it('a repeated import never resets what the employee or a supervisor changed; access changes are listed and audited', async () => {
-    // 880001 changed the password, was deactivated, has a verified number and an open mobile
-    // change; a permission is set directly (imports must never touch any of it).
+    // 880001 changed the password, was deactivated and set their own mobile (imports must never
+    // touch any of it).
     await User.updateOne(
       { ajeerCode: '880001' },
       {
@@ -232,10 +226,7 @@ describe('employee import', () => {
           passwordHash: 'changed-by-employee',
           mustChangePassword: false,
           isActive: false,
-          mobile: '03001112233',
-          mobileVerified: true,
-          mobileChange: { mobile: '03451112233', requestedAt: new Date() },
-          permissions: ['VERIFY_SUBA_MOBILE'],
+          mobile: '03451112233',
           sessionVersion: 3,
         },
       },
@@ -276,10 +267,7 @@ describe('employee import', () => {
       passwordHash: 'changed-by-employee',
       mustChangePassword: false,
       isActive: false,
-      mobile: '03001112233',
-      mobileVerified: true,
-      mobileChange: { mobile: '03451112233' },
-      permissions: ['VERIFY_SUBA_MOBILE'],
+      mobile: '03451112233',
       sessionVersion: 3,
       hrImport: { file: 'hr-list.xlsx', row: 3 },
     });
@@ -297,7 +285,6 @@ describe('employee import', () => {
     });
     // Counts only: no names, codes or numbers in the audit entry.
     expect(JSON.stringify(log?.details)).not.toMatch(/Test|0300|880001/);
-    await User.updateOne({ ajeerCode: '880001' }, { $set: { permissions: [] } });
   });
 
   it('holds every /2 or /3 code: never imported, never blocks the /1 row, listed in its own sheet', async () => {
