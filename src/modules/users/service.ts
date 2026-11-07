@@ -25,6 +25,8 @@ export function isCentralItVerifier(caller: AuthUser): boolean {
 
 /** Users in the caller's subtree whose role is below the caller's (API: GET /users). */
 export type MobileStatus = 'verified' | 'unverified' | 'none';
+/** `change` = has a requested new number waiting for its verifier (list filter only). */
+export type MobileFilter = MobileStatus | 'change';
 
 export function mobileStatusOf(u: {
   mobile?: string | null;
@@ -34,7 +36,8 @@ export function mobileStatusOf(u: {
   return u.mobileVerified === false ? 'unverified' : 'verified';
 }
 
-const MOBILE_FILTER: Record<MobileStatus, Record<string, unknown>> = {
+const MOBILE_FILTER: Record<MobileFilter, Record<string, unknown>> = {
+  change: { mobileChange: { $exists: true } },
   none: { mobile: { $exists: false } },
   unverified: { mobile: { $exists: true }, mobileVerified: false },
   verified: { mobile: { $exists: true }, mobileVerified: { $ne: false } },
@@ -42,7 +45,7 @@ const MOBILE_FILTER: Record<MobileStatus, Record<string, unknown>> = {
 
 export async function listUsers(
   caller: AuthUser,
-  opts: { unit?: string; q?: string; mobileStatus?: MobileStatus },
+  opts: { unit?: string; q?: string; mobileStatus?: MobileFilter },
 ) {
   await connectDb();
 
@@ -56,7 +59,11 @@ export async function listUsers(
   // The designated Central IT verifier also sees other pakistan accounts — only in the list of
   // numbers waiting for confirmation (it verifies them; it manages nothing else about them).
   const roles: Role[] = lowerRoles(caller);
-  if (opts.mobileStatus === 'unverified' && isCentralItVerifier(caller)) roles.push('pakistan');
+  if (
+    (opts.mobileStatus === 'unverified' || opts.mobileStatus === 'change') &&
+    isCentralItVerifier(caller)
+  )
+    roles.push('pakistan');
   const filter: Record<string, unknown> = {
     ...scope,
     _id: { $ne: new Types.ObjectId(caller.id) },
@@ -70,7 +77,7 @@ export async function listUsers(
 
   const users = await User.find(filter)
     .select(
-      'ajeerCode ajeerCodeFull name nameUr fatherName mobile mobileVerified role zimmedari unitCode isActive mustChangePassword lastLoginAt',
+      'ajeerCode ajeerCodeFull name nameUr fatherName mobile mobileVerified mobileChange role zimmedari unitCode isActive mustChangePassword lastLoginAt',
     )
     .sort({ unitCode: 1, ajeerCode: 1 })
     .limit(500)
@@ -85,6 +92,9 @@ export async function listUsers(
     fatherName: u.fatherName,
     mobile: maskMobile(u.mobile),
     mobileStatus: mobileStatusOf(u),
+    mobileChange: u.mobileChange
+      ? { mobile: maskMobile(u.mobileChange.mobile), requestedAt: u.mobileChange.requestedAt }
+      : null,
     role: u.role,
     zimmedari: u.zimmedari,
     unitCode: u.unitCode,
@@ -295,5 +305,93 @@ export async function setUserStatus(caller: AuthUser, userId: string, isActive: 
     targetId: String(target._id),
     unitPath: target.unitPath,
     details: { targetAjeerCode: target.ajeerCode, isActive },
+  });
+}
+
+/** The account whose requested mobile change the caller wants to see / confirm / reject. */
+async function loadForMobileChange(caller: AuthUser, userId: string) {
+  await connectDb();
+  const target = Types.ObjectId.isValid(userId)
+    ? await User.findById(userId).select('ajeerCode role unitPath mobile mobileChange').lean()
+    : null;
+  assertInScope(caller, target);
+  assertVerifierOf(caller, target);
+  if (!target.mobileChange) {
+    throw new AppError(409, 'CONFLICT', 'This user has no mobile change waiting for confirmation');
+  }
+  return { ...target, mobileChange: target.mobileChange };
+}
+
+/**
+ * GET /users/:id/pending-mobile-change — the full requested number, for the user's verifier, who
+ * checks it with the employee before confirming. Audit MOBILE_CHANGE_VIEW (number masked).
+ */
+export async function viewMobileChange(caller: AuthUser, userId: string): Promise<string> {
+  const target = await loadForMobileChange(caller, userId);
+  await audit({
+    action: 'MOBILE_CHANGE_VIEW',
+    actorId: caller.id,
+    actorAjeerCode: caller.ajeerCode,
+    targetType: 'user',
+    targetId: String(target._id),
+    unitPath: target.unitPath,
+    details: { targetAjeerCode: target.ajeerCode, to: maskMobile(target.mobileChange.mobile) },
+  });
+  return target.mobileChange.mobile;
+}
+
+/**
+ * POST /users/:id/confirm-mobile-change — the verifier confirms: the requested number becomes the
+ * registered (verified) mobile. Only the request the screen saw (same number) is confirmed.
+ * Audit MOBILE_CHANGE_CONFIRM with both numbers masked.
+ */
+export async function confirmMobileChange(caller: AuthUser, userId: string): Promise<void> {
+  const target = await loadForMobileChange(caller, userId);
+  const done = await User.updateOne(
+    { _id: target._id, 'mobileChange.mobile': target.mobileChange.mobile },
+    {
+      $set: { mobile: target.mobileChange.mobile, mobileVerified: true },
+      $unset: { mobileChange: 1 },
+    },
+  );
+  if (done.modifiedCount === 0) {
+    throw new AppError(409, 'CONFLICT', 'The request changed meanwhile — load the list again');
+  }
+  await audit({
+    action: 'MOBILE_CHANGE_CONFIRM',
+    actorId: caller.id,
+    actorAjeerCode: caller.ajeerCode,
+    targetType: 'user',
+    targetId: String(target._id),
+    unitPath: target.unitPath,
+    details: {
+      targetAjeerCode: target.ajeerCode,
+      from: maskMobile(target.mobile),
+      to: maskMobile(target.mobileChange.mobile),
+    },
+  });
+}
+
+/**
+ * POST /users/:id/reject-mobile-change — the verifier rejects: the request is removed and the
+ * registered number stays. Audit MOBILE_CHANGE_REJECT.
+ */
+export async function rejectMobileChange(caller: AuthUser, userId: string): Promise<void> {
+  const target = await loadForMobileChange(caller, userId);
+  const done = await User.updateOne(
+    { _id: target._id, 'mobileChange.mobile': target.mobileChange.mobile },
+    { $unset: { mobileChange: 1 } },
+  );
+  if (done.modifiedCount === 0) {
+    throw new AppError(409, 'CONFLICT', 'The request changed meanwhile — load the list again');
+  }
+  await audit({
+    action: 'MOBILE_CHANGE_REJECT',
+    actorId: caller.id,
+    actorAjeerCode: caller.ajeerCode,
+    targetType: 'user',
+    targetId: String(target._id),
+    unitPath: target.unitPath,
+    details: { targetAjeerCode: target.ajeerCode, to: maskMobile(target.mobileChange.mobile) },
   });
 }

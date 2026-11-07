@@ -8,13 +8,14 @@ import { PasswordResetRequest } from '../../models/password-reset-request.js';
 import { User } from '../../models/user.js';
 import { seedDemo } from '../../seed/seed.js';
 import { setPermission } from '../users/permissions.js';
+import { INITIAL_PASSWORD } from './schemas.js';
 import { provisionPakistanAdmin, setPakistanAdminActive } from '../users/provision.js';
 
 const app = createApp();
 
-/** Put a seeded user into the "imported, never logged in" state: password 123 + mustChangePassword. */
+/** Put a seeded user into the "imported, never logged in" state: initial password + mustChangePassword. */
 async function makeNewUser(ajeerCode: string, mobile?: string): Promise<void> {
-  const passwordHash = await bcrypt.hash('123', 4);
+  const passwordHash = await bcrypt.hash(INITIAL_PASSWORD, 4);
   await User.updateOne(
     { ajeerCode },
     mobile
@@ -42,7 +43,7 @@ describe('first login with the initial password 123', () => {
 
   it('asks for the registered mobile, without counting it as a failed login', async () => {
     for (let i = 0; i < 6; i += 1) {
-      const res = await login({ ajeerCode: '9000001', password: '123' }).expect(401);
+      const res = await login({ ajeerCode: '9000001', password: INITIAL_PASSWORD }).expect(401);
       expect(res.body.error.code).toBe('MOBILE_REQUIRED');
     }
   });
@@ -50,17 +51,25 @@ describe('first login with the initial password 123', () => {
   it('rejects a mobile that does not match', async () => {
     const res = await login({
       ajeerCode: '9000001',
-      password: '123',
+      password: INITIAL_PASSWORD,
       mobile: '03009999999',
     }).expect(401);
     expect(res.body.error.code).toBe('MOBILE_MISMATCH');
   });
 
   it('without a number on record: saved as "tasdeeq baqi", no session until the District confirms', async () => {
-    const bad = await login({ ajeerCode: noMobile, password: '123', mobile: '12345' }).expect(400);
+    const bad = await login({
+      ajeerCode: noMobile,
+      password: INITIAL_PASSWORD,
+      mobile: '12345',
+    }).expect(400);
     expect(bad.body.error.details.field).toBe('mobile');
 
-    const first = await login({ ajeerCode: noMobile, password: '123', mobile: '0301 2223344' });
+    const first = await login({
+      ajeerCode: noMobile,
+      password: INITIAL_PASSWORD,
+      mobile: '0301 2223344',
+    });
     expect(first.status).toBe(403);
     expect(first.body.error.code).toBe('MOBILE_PENDING');
     expect(first.headers['set-cookie']).toBeUndefined(); // no session before confirmation
@@ -70,9 +79,17 @@ describe('first login with the initial password 123', () => {
       await AuditLog.countDocuments({ action: 'MOBILE_SELF_REGISTER', actorAjeerCode: noMobile }),
     ).toBe(1);
     // From now on that number is the one checked; even the right one waits for the District.
-    const other = await login({ ajeerCode: noMobile, password: '123', mobile: '03009999999' });
+    const other = await login({
+      ajeerCode: noMobile,
+      password: INITIAL_PASSWORD,
+      mobile: '03009999999',
+    });
     expect(other.body.error.code).toBe('MOBILE_MISMATCH');
-    const again = await login({ ajeerCode: noMobile, password: '123', mobile: '03012223344' });
+    const again = await login({
+      ajeerCode: noMobile,
+      password: INITIAL_PASSWORD,
+      mobile: '03012223344',
+    });
     expect(again.body.error.code).toBe('MOBILE_PENDING');
     // A pending number is not a registered number for forgot-password either.
     await request(app)
@@ -102,7 +119,11 @@ describe('first login with the initial password 123', () => {
       .post(`/api/v1/users/${row!.id}/confirm-mobile`)
       .set('Cookie', district)
       .expect(409);
-    const ok = await login({ ajeerCode: noMobile, password: '123', mobile: '03012223344' });
+    const ok = await login({
+      ajeerCode: noMobile,
+      password: INITIAL_PASSWORD,
+      mobile: '03012223344',
+    });
     expect(ok.status).toBe(200);
     expect(ok.body.user.mustChangePassword).toBe(true);
   });
@@ -114,7 +135,11 @@ describe('first login with the initial password 123', () => {
       ajeerCode: { $nin: ['9090412', noMobile] },
     }).lean();
     await makeNewUser(z!.ajeerCode);
-    await login({ ajeerCode: z!.ajeerCode, password: '123', mobile: '03015556677' }).expect(403);
+    await login({
+      ajeerCode: z!.ajeerCode,
+      password: INITIAL_PASSWORD,
+      mobile: '03015556677',
+    }).expect(403);
 
     const district = await loginCookie(app, '9040001');
     const division = await loginCookie(app, '9030001'); // read-only for mobiles (CTO 5 Nov)
@@ -155,7 +180,11 @@ describe('first login with the initial password 123', () => {
       .expect(200);
     expect(JSON.stringify(seen.body)).not.toContain('03015556677');
     // The user can now type the right number (again pending).
-    const retry = await login({ ajeerCode: z!.ajeerCode, password: '123', mobile: '03017778899' });
+    const retry = await login({
+      ajeerCode: z!.ajeerCode,
+      password: INITIAL_PASSWORD,
+      mobile: '03017778899',
+    });
     expect(retry.body.error.code).toBe('MOBILE_PENDING');
   });
 
@@ -170,7 +199,11 @@ describe('first login with the initial password 123', () => {
     await makeNewUser(z!.ajeerCode);
     // A correct password with a pending number is not a failed login: no rate limit.
     for (let i = 0; i < 7; i += 1) {
-      const res = await login({ ajeerCode: z!.ajeerCode, password: '123', mobile: '03024445566' });
+      const res = await login({
+        ajeerCode: z!.ajeerCode,
+        password: INITIAL_PASSWORD,
+        mobile: '03024445566',
+      });
       expect(res.body.error.code).toBe('MOBILE_PENDING');
     }
     const id = String(z!._id);
@@ -244,7 +277,7 @@ describe('first login with the initial password 123', () => {
   it('logs in when the mobile matches (any common format) and forces a password change', async () => {
     const res = await login({
       ajeerCode: '9000001',
-      password: '123',
+      password: INITIAL_PASSWORD,
       mobile: '+92 300-1112233',
     }).expect(200);
     expect(res.body.user.mustChangePassword).toBe(true);
@@ -259,9 +292,11 @@ describe('first login with the initial password 123', () => {
       request(app)
         .post('/api/v1/auth/change-password')
         .set('Cookie', cookie)
-        .send({ currentPassword: '123', newPassword });
+        .send({ currentPassword: INITIAL_PASSWORD, newPassword });
 
-    expect((await change('123').expect(400)).body.error.code).toBe('VALIDATION_FAILED'); // too short
+    expect((await change(INITIAL_PASSWORD).expect(400)).body.error.details.reason).toBe(
+      'INITIAL_PASSWORD',
+    );
     expect((await change('12345').expect(400)).body.error.code).toBe('VALIDATION_FAILED');
     expect((await change('9000001').expect(400)).body.error.details.reason).toBe(
       'EQUALS_AJEER_CODE',
@@ -294,7 +329,7 @@ describe('mobile verification one level up (CTO 5 Nov 2026)', () => {
 
   beforeAll(async () => {
     await seedDemo({ reset: true });
-    const passwordHash = await bcrypt.hash('123', 4);
+    const passwordHash = await bcrypt.hash(INITIAL_PASSWORD, 4);
     for (const a of ACCOUNTS) {
       const u = await User.create({
         ...a,
@@ -304,7 +339,11 @@ describe('mobile verification one level up (CTO 5 Nov 2026)', () => {
       });
       ids[a.ajeerCode] = String(u._id);
       // First login with a self-entered number → pending, no session.
-      const res = await login({ ajeerCode: a.ajeerCode, password: '123', mobile: '03031112233' });
+      const res = await login({
+        ajeerCode: a.ajeerCode,
+        password: INITIAL_PASSWORD,
+        mobile: '03031112233',
+      });
       expect(res.body.error.code).toBe('MOBILE_PENDING');
     }
     cookies = {
@@ -324,9 +363,11 @@ describe('mobile verification one level up (CTO 5 Nov 2026)', () => {
       .set('Cookie', cookies['9030001']!)
       .expect(200);
     await act('9030001', id, 'confirm-mobile').expect(200);
-    const ok = await login({ ajeerCode: '9040099', password: '123', mobile: '03031112233' }).expect(
-      200,
-    );
+    const ok = await login({
+      ajeerCode: '9040099',
+      password: INITIAL_PASSWORD,
+      mobile: '03031112233',
+    }).expect(200);
     expect(ok.body.user.mustChangePassword).toBe(true);
   });
 
@@ -374,7 +415,7 @@ describe('mobile verification one level up (CTO 5 Nov 2026)', () => {
   });
 
   it('the designated admin verifies suba accounts only, not lower levels', async () => {
-    const passwordHash = await bcrypt.hash('123', 4);
+    const passwordHash = await bcrypt.hash(INITIAL_PASSWORD, 4);
     const div = await User.create({
       ajeerCode: '9030098',
       role: 'division',
@@ -384,7 +425,9 @@ describe('mobile verification one level up (CTO 5 Nov 2026)', () => {
       passwordHash,
       mustChangePassword: true,
     });
-    await login({ ajeerCode: '9030098', password: '123', mobile: '03031114455' }).expect(403);
+    await login({ ajeerCode: '9030098', password: INITIAL_PASSWORD, mobile: '03031114455' }).expect(
+      403,
+    );
     await act('9010001', String(div._id), 'confirm-mobile').expect(403); // two levels up
     await act('9020001', String(div._id), 'confirm-mobile').expect(200);
   });
@@ -442,7 +485,7 @@ describe('mobile verification one level up (CTO 5 Nov 2026)', () => {
   });
 
   it('a revoked admin and a non-pakistan holder of the permission are both refused', async () => {
-    const passwordHash = await bcrypt.hash('123', 4);
+    const passwordHash = await bcrypt.hash(INITIAL_PASSWORD, 4);
     const suba = await User.create({
       ajeerCode: '9020098',
       role: 'suba',
@@ -453,7 +496,9 @@ describe('mobile verification one level up (CTO 5 Nov 2026)', () => {
       mustChangePassword: true,
     });
     const id = String(suba._id);
-    await login({ ajeerCode: '9020098', password: '123', mobile: '03031116677' }).expect(403);
+    await login({ ajeerCode: '9020098', password: INITIAL_PASSWORD, mobile: '03031116677' }).expect(
+      403,
+    );
     // The revoked admin's existing session: every verification endpoint refuses.
     await act('9010001', id, 'confirm-mobile').expect(403);
     await act('9010001', id, 'reject-mobile').expect(403);
@@ -474,7 +519,11 @@ describe('mobile verification one level up (CTO 5 Nov 2026)', () => {
       .set('Cookie', cookies['9020001']!)
       .expect(403);
     await User.updateOne({ ajeerCode: '9020001' }, { $set: { permissions: [] } });
-    const still = await login({ ajeerCode: '9020098', password: '123', mobile: '03031116677' });
+    const still = await login({
+      ajeerCode: '9020098',
+      password: INITIAL_PASSWORD,
+      mobile: '03031116677',
+    });
     expect(still.body.error.code).toBe('MOBILE_PENDING');
   });
 
@@ -492,7 +541,11 @@ describe('mobile verification one level up (CTO 5 Nov 2026)', () => {
       .get(`/api/v1/users/${id}/pending-mobile`)
       .set('Cookie', cookies['9010001']!)
       .expect(403);
-    const still = await login({ ajeerCode: '9010099', password: '123', mobile: '03031112233' });
+    const still = await login({
+      ajeerCode: '9010099',
+      password: INITIAL_PASSWORD,
+      mobile: '03031112233',
+    });
     expect(still.body.error.code).toBe('MOBILE_PENDING');
   });
 });
@@ -538,7 +591,7 @@ describe('Pakistan Admin provisioning and Central IT mobile verification (CTO 6 
     const r = await provisionPakistanAdmin({ ajeerCode, name: `Admin ${ajeerCode}`, ...REFS });
     if (!r.ok) throw new Error(r.reason);
     ids[ajeerCode] = r.id;
-    const res = await login({ ajeerCode, password: '123', mobile });
+    const res = await login({ ajeerCode, password: INITIAL_PASSWORD, mobile });
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('MOBILE_PENDING');
     expect(res.headers['set-cookie']).toBeUndefined(); // no session before verification
@@ -597,7 +650,11 @@ describe('Pakistan Admin provisioning and Central IT mobile verification (CTO 6 
       },
     });
     // First login: the typed mobile waits — no session.
-    const first = await login({ ajeerCode: '9011001', password: '123', mobile: '03031230001' });
+    const first = await login({
+      ajeerCode: '9011001',
+      password: INITIAL_PASSWORD,
+      mobile: '03031230001',
+    });
     expect(first.body.error.code).toBe('MOBILE_PENDING');
     expect(first.headers['set-cookie']).toBeUndefined();
   });
@@ -692,13 +749,19 @@ describe('Pakistan Admin provisioning and Central IT mobile verification (CTO 6 
     // Reject: number removed, the person types it again — still no session.
     await act('9011001', id, 'pending-mobile').expect(200);
     await act('9011001', id, 'reject-mobile').expect(200);
-    const again = await login({ ajeerCode: '9011003', password: '123', mobile: '03031230033' });
+    const again = await login({
+      ajeerCode: '9011003',
+      password: INITIAL_PASSWORD,
+      mobile: '03031230033',
+    });
     expect(again.body.error.code).toBe('MOBILE_PENDING');
     // Confirm: now the login works (forced password change next).
     await act('9011001', id, 'confirm-mobile').expect(200);
-    const ok = await login({ ajeerCode: '9011003', password: '123', mobile: '03031230033' }).expect(
-      200,
-    );
+    const ok = await login({
+      ajeerCode: '9011003',
+      password: INITIAL_PASSWORD,
+      mobile: '03031230033',
+    }).expect(200);
     expect(ok.body.user.mustChangePassword).toBe(true);
 
     const logs = await AuditLog.find({
@@ -735,7 +798,11 @@ describe('Pakistan Admin provisioning and Central IT mobile verification (CTO 6 
       actor: 'test',
     });
     await all3('9011001', ids['9011004']!, 403);
-    const still = await login({ ajeerCode: '9011004', password: '123', mobile: '03031230004' });
+    const still = await login({
+      ajeerCode: '9011004',
+      password: INITIAL_PASSWORD,
+      mobile: '03031230004',
+    });
     expect(still.body.error.code).toBe('MOBILE_PENDING');
   });
 
@@ -864,14 +931,14 @@ describe('forgot password → district reset', () => {
       .expect(200);
 
     // Every session issued before the reset is dead — also for /auth/me and change-password,
-    // so an old device cannot set a new password with "123".
+    // so an old device cannot set a new password with the initial password.
     await request(app).get('/api/v1/meta').set('Cookie', phone).expect(401);
     await request(app).get('/api/v1/auth/me').set('Cookie', phone).expect(401);
     await request(app).get('/api/v1/meta').set('Authorization', `Bearer ${bearer}`).expect(401);
     await request(app)
       .post('/api/v1/auth/change-password')
       .set('Cookie', phone)
-      .send({ currentPassword: '123', newPassword: 'taken-over' })
+      .send({ currentPassword: INITIAL_PASSWORD, newPassword: 'taken-over' })
       .expect(401);
 
     expect(await PasswordResetRequest.countDocuments({ status: 'pending' })).toBe(0);
@@ -880,7 +947,7 @@ describe('forgot password → district reset', () => {
     await login({ ajeerCode: '9090412', password: 'demo1234' }).expect(401);
     const res = await login({
       ajeerCode: '9090412',
-      password: '123',
+      password: INITIAL_PASSWORD,
       mobile: '03000000000',
     }).expect(200);
     expect(res.body.user.mustChangePassword).toBe(true);

@@ -272,3 +272,75 @@ export async function resetToInitialPassword(
     details: { targetAjeerCode: target.ajeerCode, fromRequest: closed.modifiedCount > 0 },
   });
 }
+
+/**
+ * POST /auth/mobile-change { mobile } — the user asks to replace their registered mobile (CTO
+ * 7 Nov 2026). The current number keeps working (login, forgot password) until the user's
+ * verifier — the same hierarchy as a first-login number (assertVerifierOf) — confirms the new
+ * one. A new request replaces an open one. Audit MOBILE_CHANGE_REQUEST (number masked).
+ */
+export async function requestMobileChange(user: AuthUser, mobile: string): Promise<void> {
+  await connectDb();
+  const typed = normalizeMobile(mobile);
+  if (!typed) {
+    throw new AppError(400, 'VALIDATION_FAILED', 'Mobile is not a valid Pakistani mobile number', {
+      field: 'mobile',
+    });
+  }
+  const doc = await User.findById(user.id).select('mobile mobileVerified').lean();
+  if (!doc?.mobile || doc.mobileVerified === false) {
+    throw new AppError(409, 'CONFLICT', 'There is no confirmed mobile number to change yet');
+  }
+  if (doc.mobile === typed) {
+    throw new AppError(400, 'VALIDATION_FAILED', 'This is already your registered number', {
+      field: 'mobile',
+      reason: 'SAME_MOBILE',
+    });
+  }
+  await User.updateOne(
+    { _id: doc._id },
+    { $set: { mobileChange: { mobile: typed, requestedAt: new Date() } } },
+  );
+  await audit({
+    action: 'MOBILE_CHANGE_REQUEST',
+    actorId: user.id,
+    actorAjeerCode: user.ajeerCode,
+    targetType: 'user',
+    targetId: user.id,
+    unitPath: user.unitPath,
+    details: { from: maskMobile(doc.mobile), to: maskMobile(typed) },
+  });
+}
+
+/** DELETE /auth/mobile-change — the user withdraws an open request. Audit MOBILE_CHANGE_CANCEL. */
+export async function cancelMobileChange(user: AuthUser): Promise<void> {
+  await connectDb();
+  const doc = await User.findOneAndUpdate(
+    { _id: user.id, mobileChange: { $exists: true } },
+    { $unset: { mobileChange: 1 } },
+  )
+    .select('mobileChange')
+    .lean();
+  if (!doc?.mobileChange) return;
+  await audit({
+    action: 'MOBILE_CHANGE_CANCEL',
+    actorId: user.id,
+    actorAjeerCode: user.ajeerCode,
+    targetType: 'user',
+    targetId: user.id,
+    unitPath: user.unitPath,
+    details: { to: maskMobile(doc.mobileChange.mobile) },
+  });
+}
+
+/** The caller's own mobile (masked) and an open change request, for the profile screens. */
+export async function ownMobile(user: AuthUser) {
+  await connectDb();
+  const doc = await User.findById(user.id).select('mobile mobileChange').lean();
+  return {
+    mobile: maskMobile(doc?.mobile),
+    mobileChange: doc?.mobileChange
+      ? { mobile: maskMobile(doc.mobileChange.mobile), requestedAt: doc.mobileChange.requestedAt }
+      : null,
+  };
+}

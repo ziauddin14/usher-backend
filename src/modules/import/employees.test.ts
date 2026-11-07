@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import bcrypt from 'bcryptjs';
 import ExcelJS from 'exceljs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { AuditLog } from '../../models/audit-log.js';
 import { Unit } from '../../models/unit.js';
 import { NOT_CENTRALLY_MANAGED, User } from '../../models/user.js';
 import { seedDemo } from '../../seed/seed.js';
@@ -112,11 +113,13 @@ describe('employee import', () => {
 
   it('reports every bad row with its row number', async () => {
     const plan = validateRows(await readEmployeeSheet(file));
-    expect(plan.errors.map((e) => e.row)).toEqual([7, 8, 9, 10, 11]);
+    // Row 11 ("880001/2") is held, not an error (CTO 7 Nov 2026).
+    expect(plan.errors.map((e) => e.row)).toEqual([7, 8, 9, 10]);
     expect(plan.errors.find((e) => e.row === 8)?.message).toMatch(/Zimmedari/);
-    expect(plan.errors.find((e) => e.row === 11)?.message).toMatch(/twice/);
     expect(plan.warnings.map((w) => w.ajeerCode)).toEqual(['880007', '9090412']); // no mobile
-    expect(plan.otherSuffix.map((r) => r.ajeerCodeFull)).toEqual(['880001/2']);
+    expect(plan.otherSuffix).toEqual([
+      expect.objectContaining({ row: 11, ajeerCodeFull: '880001/2', imported: false }),
+    ]);
     // "880001/1" and "880001/2" share the login code 880001: listed for the CTO.
     expect(plan.sameCode).toEqual([
       {
@@ -143,7 +146,7 @@ describe('employee import', () => {
     expect(await Unit.countDocuments()).toBe(before.units);
   });
 
-  it('imports: new users get password 123 + forced change; existing passwords stay', async () => {
+  it('imports: new users get password demo1234 + forced change; existing passwords stay', async () => {
     const before = await User.findOne({ ajeerCode: '880007' }).select('+passwordHash').lean();
     const result = await importEmployees(await readEmployeeSheet(file), { dryRun: false });
     expect(result).toMatchObject({ created: 3, updated: 1 });
@@ -162,7 +165,7 @@ describe('employee import', () => {
       mustChangePassword: true,
       isDemo: false,
     });
-    expect(await bcrypt.compare('123', one!.passwordHash)).toBe(true);
+    expect(await bcrypt.compare('demo1234', one!.passwordHash)).toBe(true);
 
     const urdu = await User.findOne({ ajeerCode: '880002' }).lean();
     expect(urdu).toMatchObject({
@@ -217,6 +220,104 @@ describe('employee import', () => {
       mobile: '03001112244',
       mobileVerified: true,
     });
+  });
+
+  it('a repeated import never resets what the employee or a supervisor changed; access changes are listed and audited', async () => {
+    // 880001 changed the password, was deactivated, has a verified number and an open mobile
+    // change; a permission is set directly (imports must never touch any of it).
+    await User.updateOne(
+      { ajeerCode: '880001' },
+      {
+        $set: {
+          passwordHash: 'changed-by-employee',
+          mustChangePassword: false,
+          isActive: false,
+          mobile: '03001112233',
+          mobileVerified: true,
+          mobileChange: { mobile: '03451112233', requestedAt: new Date() },
+          permissions: ['VERIFY_SUBA_MOBILE'],
+          sessionVersion: 3,
+        },
+      },
+    );
+    // HR now lists the Rohri district head as an Ushar zimmedar there.
+    const again = await writeSheet([
+      [
+        '880001/1',
+        'Test Zimmedar One',
+        '',
+        'Ushar',
+        'Interior Sindh',
+        'Sukkur',
+        'Ghotki',
+        '03009990000',
+      ],
+      [880003, 'Test District Head', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Rohri', ''],
+    ]);
+    const dry = await importEmployees(await readEmployeeSheet(again), { dryRun: true });
+    expect(dry.changes).toEqual([
+      expect.objectContaining({
+        ajeerCode: '880003',
+        field: 'role',
+        from: 'district',
+        to: 'zimmedar',
+      }),
+      expect.objectContaining({ ajeerCode: '880003', field: 'zimmedari', from: '', to: 'ushar' }),
+    ]);
+    const auditsBefore = await AuditLog.countDocuments({ action: 'IMPORT_EMPLOYEES' });
+    const result = await importEmployees(await readEmployeeSheet(again), {
+      dryRun: false,
+      source: { file: 'hr-list.xlsx', operator: 'cli:test' },
+    });
+    expect(result).toMatchObject({ created: 0, updated: 2 });
+
+    const one = await User.findOne({ ajeerCode: '880001' }).select('+passwordHash').lean();
+    expect(one).toMatchObject({
+      passwordHash: 'changed-by-employee',
+      mustChangePassword: false,
+      isActive: false,
+      mobile: '03001112233',
+      mobileVerified: true,
+      mobileChange: { mobile: '03451112233' },
+      permissions: ['VERIFY_SUBA_MOBILE'],
+      sessionVersion: 3,
+      hrImport: { file: 'hr-list.xlsx', row: 3 },
+    });
+    expect(await User.countDocuments({ ajeerCode: '880001' })).toBe(1);
+    expect(await User.findOne({ ajeerCode: '880003' }).lean()).toMatchObject({
+      role: 'zimmedar',
+      zimmedari: 'ushar',
+    });
+
+    expect(await AuditLog.countDocuments({ action: 'IMPORT_EMPLOYEES' })).toBe(auditsBefore + 1);
+    const log = await AuditLog.findOne({ action: 'IMPORT_EMPLOYEES' }).sort({ at: -1 }).lean();
+    expect(log).toMatchObject({
+      actorAjeerCode: 'cli:test',
+      details: { file: 'hr-list.xlsx', created: 0, updated: 2, changes: 2 },
+    });
+    // Counts only: no names, codes or numbers in the audit entry.
+    expect(JSON.stringify(log?.details)).not.toMatch(/Test|0300|880001/);
+    await User.updateOne({ ajeerCode: '880001' }, { $set: { permissions: [] } });
+  });
+
+  it('holds every /2 or /3 code: never imported, never blocks the /1 row, listed in its own sheet', async () => {
+    const held = await writeSheet([
+      ['880021/2', 'Held Two', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
+      ['880021/1', 'Kept One', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
+      ['880022/3', 'Held Three', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
+    ]);
+    const result = await importEmployees(await readEmployeeSheet(held), { dryRun: false });
+    expect(result.otherSuffix.map((r) => [r.ajeerCodeFull, r.imported])).toEqual([
+      ['880021/2', false],
+      ['880022/3', false],
+    ]);
+    expect(result.errors).toEqual([]);
+    expect(result.created).toBe(1);
+    expect(await User.findOne({ ajeerCode: '880021' }).lean()).toMatchObject({
+      name: 'Kept One',
+      ajeerCodeFull: '880021/1',
+    });
+    expect(await User.exists({ ajeerCode: '880022' })).toBeNull();
   });
 });
 

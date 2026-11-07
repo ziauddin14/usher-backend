@@ -150,3 +150,65 @@ export function readRows<C extends string>(
   }
   throw new Error(`No worksheet has a header row with the "${required}" column`);
 }
+
+export interface SheetInspection<C extends string> {
+  name: string;
+  /** Rows with any content (title and header rows included). */
+  rows: number;
+  /** Row number of the header (first row containing the `required` column), if any. */
+  headerRow?: number;
+  /** Known column → the header text that matched it. */
+  mapped: Partial<Record<C, string>>;
+  /** Header texts that match no known column (they are not read). */
+  unmapped: string[];
+  /** Rows below the header with at least one known column. */
+  dataRows: number;
+}
+
+/**
+ * Describe every sheet (never the "Location" sheet — loadWorkbook drops it): where the header is
+ * and which columns it maps. Reads header texts and counts only, no cell values below the header.
+ */
+export function inspectSheets<C extends string>(
+  workbook: ExcelJS.Workbook,
+  columns: Record<C, readonly string[]>,
+  required: C,
+): SheetInspection<C>[] {
+  return workbook.worksheets.map((sheet) => {
+    const out: SheetInspection<C> = {
+      name: sheet.name,
+      rows: 0,
+      mapped: {},
+      unmapped: [],
+      dataRows: 0,
+    };
+    let header: Map<number, C> | undefined;
+    sheet.eachRow({ includeEmpty: false }, (excelRow, rowNumber) => {
+      out.rows += 1;
+      const texts = new Map<number, string>();
+      excelRow.eachCell({ includeEmpty: false }, (cell, col) => {
+        texts.set(col, cell.text.trim());
+      });
+      if (!header) {
+        const found = new Map<number, C>();
+        for (const [col, text] of texts) {
+          const k = headerKey(text);
+          const column = (Object.keys(columns) as C[]).find((c) => columns[c].includes(k));
+          if (column && ![...found.values()].includes(column)) found.set(col, column);
+        }
+        if ([...found.values()].includes(required)) {
+          header = found;
+          out.headerRow = rowNumber;
+          for (const [col, text] of texts) {
+            const column = found.get(col);
+            if (column) out.mapped[column] = text;
+            else if (text) out.unmapped.push(text);
+          }
+        }
+        return;
+      }
+      if ([...header.keys()].some((col) => texts.get(col))) out.dataRows += 1;
+    });
+    return out;
+  });
+}

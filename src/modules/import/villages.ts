@@ -1,8 +1,10 @@
 // Village list import (Excel) — run AFTER the employee import. Real data stays in backend/private/.
-// Each village gets status "approved" and is assigned to its Ushar Zimmedar (assignedTo).
+// Each village gets status "approved" and is assigned to its Ushar Zimmedar (assignedTo) unless
+// somebody is already responsible for it (an import never undoes the District's assignment).
 import ExcelJS from 'exceljs';
-import { Types } from 'mongoose';
+import { type AnyBulkWriteOperation, Types } from 'mongoose';
 import { normalizeAjeerCode } from '../../lib/ajeer-code.js';
+import { audit } from '../../lib/audit.js';
 import { connectDb } from '../../lib/db.js';
 import { DistrictNames } from '../../lib/district-names.js';
 import { villageNameKey } from '../../lib/text.js';
@@ -10,7 +12,7 @@ import { unitKey } from '../../lib/unit-name.js';
 import { headerKey, loadWorkbook, readRows } from '../../lib/xlsx.js';
 import { Unit } from '../../models/unit.js';
 import { User } from '../../models/user.js';
-import { Village } from '../../models/village.js';
+import { Village, type VillageDoc } from '../../models/village.js';
 
 /** Spec headers + the department export (Sheet1 of the village list). */
 const COLUMNS = {
@@ -36,7 +38,7 @@ const COLUMNS = {
   ],
 } as const;
 type Column = keyof typeof COLUMNS;
-const COLUMN_KEYS = Object.fromEntries(
+export const COLUMN_KEYS = Object.fromEntries(
   Object.entries(COLUMNS).map(([c, names]) => [c, (names as readonly string[]).map(headerKey)]),
 ) as Record<Column, string[]>;
 
@@ -80,13 +82,27 @@ export interface VillageImportResult {
   noName: UnmatchedRow[];
   /**
    * Villages listed under a District / Division (or other supervisor) user: imported with no
-   * zimmedar ("district pool") — every zimmedar of the district finds them by search, and the
-   * District assigns them in Step 4.
+   * zimmedar ("district pool"). No zimmedar sees or uses them until the District assigns them
+   * (CTO 7 Nov 2026: a zimmedar sees only assigned villages).
    */
   districtPool: UnmatchedRow[];
   /** Villages imported without a zimmedar, because the zimmedar could not be matched. */
   unmatchedZimmedar: UnmatchedRow[];
   conflicts: Conflict[];
+  /**
+   * Villages already given to a zimmedar (by an earlier import or by the District) whom the file
+   * names differently: the current assignment is kept — an import never undoes the District.
+   */
+  assignmentKept: { village: string; district: string; current: string; inFile: string }[];
+  /** File names that matched a village under an earlier spelling (renamed or merged). */
+  formerNameMatches: { inFile: string; district: string; village: string }[];
+}
+
+/** Who ran an import and from which file (kept on new villages and in the audit log). */
+export interface VillageImportSource {
+  /** File name only — never a folder path. */
+  file: string;
+  operator: string;
 }
 
 const clean = (s: string | undefined) => s?.replace(/\s+/g, ' ').trim() ?? '';
@@ -104,12 +120,21 @@ interface Group {
   pool?: UnmatchedRow;
 }
 
-/** Plan and (unless dryRun) apply. Upsert by district + nameKey; never touches merged villages. */
+/**
+ * Plan and (unless dryRun) apply. A village is matched in its district by its normalized name, by
+ * an earlier spelling (formerNames) or through a merged duplicate; otherwise it is created. An
+ * existing assignment is never replaced; merged villages are never revived.
+ */
 export async function importVillages(
   rows: VillageRow[],
-  { dryRun, names = DistrictNames.load() }: { dryRun: boolean; names?: DistrictNames },
+  {
+    dryRun,
+    names = DistrictNames.load(),
+    source,
+  }: { dryRun: boolean; names?: DistrictNames; source?: VillageImportSource },
 ): Promise<VillageImportResult> {
   await connectDb();
+  const startedAt = new Date();
 
   const users = await User.find().select('_id ajeerCode name nameUr role unitCode unitPath').lean();
   const byCode = new Map(users.map((u) => [u.ajeerCode, u]));
@@ -261,51 +286,153 @@ export async function importVillages(
     return { ...g, assignedTo: chosen };
   });
 
-  const existing = await Village.find({
-    status: { $in: ['approved', 'pending'] as ('approved' | 'pending')[] },
-  })
-    .select('_id unitPath nameKey')
+  // Existing villages of the districts in the file: live ones by name and earlier spellings, and
+  // merged duplicates through the village they were merged into.
+  const paths = [...new Set(plans.map((p) => p.district.path))];
+  const existing = await Village.find({ unitPath: { $in: paths } })
+    .select('_id name unitPath nameKey status mergedInto assignedTo formerNames')
     .lean();
-  const existingKeys = new Set(existing.map((v) => `${v.unitPath}|${v.nameKey}`));
+  const liveById = new Map(
+    existing.filter((v) => v.status !== 'merged').map((v) => [String(v._id), v]),
+  );
+  const byKey = new Map<string, (typeof existing)[number]>();
+  for (const v of liveById.values()) byKey.set(`${v.unitPath}|${v.nameKey}`, v);
+  for (const v of liveById.values()) {
+    for (const f of v.formerNames ?? []) {
+      const k = `${v.unitPath}|${f.nameKey}`;
+      if (!byKey.has(k)) byKey.set(k, v);
+    }
+  }
+  for (const v of existing) {
+    if (v.status !== 'merged') continue;
+    // Follow a chain of merges to the live village (bounded, in case of bad data).
+    let target = v;
+    for (let i = 0; i < 10 && target.status === 'merged' && target.mergedInto; i += 1) {
+      const next = existing.find((x) => String(x._id) === String(target.mergedInto));
+      if (!next) break;
+      target = next;
+    }
+    const k = `${v.unitPath}|${v.nameKey}`;
+    if (target.status !== 'merged' && !byKey.has(k)) byKey.set(k, target);
+  }
+
+  const userLabel = new Map(users.map((u) => [String(u._id), `${u.ajeerCode} ${u.name}`]));
+  const assignmentKept: VillageImportResult['assignmentKept'] = [];
+  const formerNameMatches: VillageImportResult['formerNameMatches'] = [];
+  const matched = plans.map((p) => {
+    const match = byKey.get(`${p.district.path}|${p.nameKey}`);
+    if (match && match.nameKey !== p.nameKey) {
+      formerNameMatches.push({ inFile: p.name, district: p.district.code, village: match.name });
+    }
+    if (match?.assignedTo && p.assignedTo && String(match.assignedTo) !== p.assignedTo) {
+      assignmentKept.push({
+        village: match.name,
+        district: p.district.code,
+        current: userLabel.get(String(match.assignedTo)) ?? String(match.assignedTo),
+        inFile: labels.get(p.assignedTo) ?? p.assignedTo,
+      });
+    }
+    return { plan: p, match };
+  });
 
   const result: VillageImportResult = {
     dryRun,
     rows: rows.length,
     villages: plans.length,
     duplicateRows,
-    created: plans.filter((p) => !existingKeys.has(`${p.district.path}|${p.nameKey}`)).length,
-    updated: plans.filter((p) => existingKeys.has(`${p.district.path}|${p.nameKey}`)).length,
+    created: matched.filter((m) => !m.match).length,
+    updated: matched.filter((m) => m.match).length,
     assigned: plans.filter((p) => p.assignedTo).length,
     unmatchedVillages,
     noName,
     districtPool,
     unmatchedZimmedar,
     conflicts,
+    assignmentKept,
+    formerNameMatches,
   };
   if (dryRun || plans.length === 0) return result;
 
-  await Village.bulkWrite(
-    plans.map((p) => ({
-      updateOne: {
-        filter: {
-          unitPath: p.district.path,
-          nameKey: p.nameKey,
-          status: { $in: ['approved', 'pending'] as ('approved' | 'pending')[] },
-        },
-        update: {
-          $set: {
-            status: 'approved' as const,
-            ...(p.tehsil ? { tehsil: p.tehsil } : {}),
-            ...(p.assignedTo ? { assignedTo: new Types.ObjectId(p.assignedTo) } : {}),
+  // Two names of the file can lead to one village (a name and its earlier spelling): update once.
+  const seen = new Set<string>();
+  const ops: AnyBulkWriteOperation<VillageDoc>[] = [];
+  for (const { plan: p, match } of matched) {
+    if (match) {
+      const id = String(match._id);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      ops.push(
+        {
+          updateOne: {
+            filter: { _id: match._id, status: { $in: LIVE_STATUS } },
+            update: {
+              $set: {
+                status: 'approved' as const,
+                ...(p.tehsil ? { tehsil: p.tehsil } : {}),
+                ...(match.status === 'pending' ? { approvedAt: startedAt } : {}),
+              },
+            },
           },
-          $setOnInsert: { name: p.name, districtCode: p.district.code },
         },
-        upsert: true,
+        // Only a village nobody is responsible for gets the file's zimmedar.
+        ...(p.assignedTo
+          ? [
+              {
+                updateOne: {
+                  filter: { _id: match._id, assignedTo: null },
+                  update: { $set: { assignedTo: new Types.ObjectId(p.assignedTo) } },
+                },
+              },
+            ]
+          : []),
+      );
+      continue;
+    }
+    ops.push({
+      insertOne: {
+        document: {
+          createdAt: startedAt,
+          updatedAt: startedAt,
+          name: p.name,
+          nameKey: p.nameKey,
+          districtCode: p.district.code,
+          unitPath: p.district.path,
+          ...(p.tehsil ? { tehsil: p.tehsil } : {}),
+          status: 'approved' as const,
+          approvedAt: startedAt,
+          ...(p.assignedTo ? { assignedTo: new Types.ObjectId(p.assignedTo) } : {}),
+          source: {
+            kind: 'import' as const,
+            ...(source ? { file: source.file } : {}),
+            row: p.row,
+            at: startedAt,
+          },
+        },
       },
-    })),
-  );
+    });
+  }
+  if (ops.length > 0) await Village.bulkWrite(ops, { ordered: false });
+
+  // One audit entry per real run: counts only.
+  await audit({
+    action: 'IMPORT_VILLAGES',
+    actorAjeerCode: source?.operator ?? 'import',
+    targetType: 'import',
+    details: {
+      ...(source ? { file: source.file } : {}),
+      rows: result.rows,
+      villages: result.villages,
+      created: result.created,
+      updated: result.updated,
+      assigned: result.assigned,
+      notImported: result.unmatchedVillages.length + result.noName.length,
+      assignmentKept: result.assignmentKept.length,
+    },
+  });
   return result;
 }
+
+const LIVE_STATUS: ('approved' | 'pending')[] = ['approved', 'pending'];
 
 /** Excel report with one sheet per problem list (Urdu text is kept as is). */
 export async function writeVillageReport(result: VillageImportResult, file: string): Promise<void> {
@@ -354,6 +481,16 @@ export async function writeVillageReport(result: VillageImportResult, file: stri
     'Aik gaon, kai zimmedar',
     ['Gaon', 'District', 'Zimmedaran (rows)', 'Chuna gaya'],
     result.conflicts.map((c) => [c.village, c.district, c.zimmedaran, c.chosen]),
+  );
+  sheet(
+    'Assignment barqarar',
+    ['Gaon', 'District', 'Abhi kis ke paas (rakha gaya)', 'File mein'],
+    result.assignmentKept.map((a) => [a.village, a.district, a.current, a.inFile]),
+  );
+  sheet(
+    'Purane naam se mila',
+    ['File mein naam', 'District', 'System mein gaon'],
+    result.formerNameMatches.map((m) => [m.inFile, m.district, m.village]),
   );
   await wb.xlsx.writeFile(file);
 }

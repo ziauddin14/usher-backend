@@ -2,6 +2,7 @@
 // Upsert by Ajeer Code; new units are created on the fly; existing passwords are never touched,
 // and a mobile already on record is never replaced (differences go to the report, CTO 5 Nov 2026).
 import bcrypt from 'bcryptjs';
+import { audit } from '../../lib/audit.js';
 import { connectDb } from '../../lib/db.js';
 import { DistrictNames } from '../../lib/district-names.js';
 import ExcelJS from 'exceljs';
@@ -35,7 +36,7 @@ const COLUMNS = {
   mobile: ['Mobile', 'Mobile No', 'Mobile Number', 'Phone', 'موبائل', 'موبائل نمبر'],
 } as const;
 type Column = keyof typeof COLUMNS;
-const COLUMN_KEYS = Object.fromEntries(
+export const COLUMN_KEYS = Object.fromEntries(
   Object.entries(COLUMNS).map(([c, names]) => [c, (names as readonly string[]).map(headerKey)]),
 ) as Record<Column, string[]>;
 
@@ -130,11 +131,27 @@ export interface ImportResult {
   warnings: RowProblem[];
   /** Codes on more than one row: the first row is imported, the others are rejected. */
   sameCode: SameCodeGroup[];
-  /** Rows whose code ends in something other than "/1" — listed for the CTO. */
+  /** Rows whose code ends in something other than "/1": held (never imported) for the CTO. */
   otherSuffix: SameCodeGroup['rows'];
   /** Existing users whose file mobile differs from the one on record — the record is kept. */
   mobileConflicts: { row: number; ajeerCode: string; onRecord: string; inFile: string }[];
+  /**
+   * Existing accounts whose role, zimmedari or unit the file changes (HR is the source, so the
+   * change is applied) — listed so the dry run shows every change of access before the real run.
+   */
+  changes: { row: number; ajeerCode: string; field: string; from: string; to: string }[];
 }
+
+/** Who ran an import and from which file (kept on the accounts and in the audit log). */
+export interface ImportSource {
+  /** File name only — never a folder path. */
+  file: string;
+  /** The operator who ran it (e.g. "cli:<name>"), recorded as the audit actor. */
+  operator: string;
+}
+
+/** A code suffix other than /1: held for the CTO, never imported. */
+const HELD_SUFFIX = /\/(?!1$)/;
 
 const clean = (s: string | undefined) => s?.replace(/\s+/g, ' ').trim() || undefined;
 const hasUrduScript = (s: string) => /[؀-ۿ]/.test(s);
@@ -155,6 +172,21 @@ export function validateRows(rows: RawRow[]): ImportPlan {
   for (const { row, values } of rows) {
     const ajeerCode = normalizeAjeerCode(values.ajeerCode) ?? '';
     const ajeerCodeFull = fullAjeerCode(values.ajeerCode) ?? ajeerCode;
+    // A code written with a suffix other than /1 ("12345/2", "12345/3") is never imported and never
+    // blocks a /1 row of the same code: its meaning is for the CTO to decide after seeing the HR
+    // file (CTO 7 Nov 2026). It goes to its own report sheet only.
+    if (ajeerCode && HELD_SUFFIX.test(ajeerCodeFull)) {
+      const group = byCode.get(ajeerCode) ?? [];
+      group.push({
+        row,
+        ajeerCodeFull,
+        name: clean(values.name) ?? '',
+        zimmedari: clean(values.zimmedari) ?? '',
+        district: clean(values.district) ?? '',
+      });
+      byCode.set(ajeerCode, group);
+      continue;
+    }
     const problems: string[] = [];
     if (!ajeerCode) problems.push('Ajeer Code must be 3–9 digits (optionally followed by /n)');
     else if (seen.has(ajeerCode)) {
@@ -235,7 +267,7 @@ export function validateRows(rows: RawRow[]): ImportPlan {
     }));
   const otherSuffix = [...byCode.values()]
     .flat()
-    .filter((r) => /\/(?!1$)/.test(r.ajeerCodeFull))
+    .filter((r) => HELD_SUFFIX.test(r.ajeerCodeFull))
     .map((r) => ({ ...r, imported: valid.some((v) => v.row === r.row) }))
     .sort((a, b) => a.row - b.row);
   return { valid, errors, warnings, sameCode, otherSuffix };
@@ -350,15 +382,20 @@ class UnitResolver {
 /** Plan and (unless dryRun) apply the import. New units get Roman names from district-names.csv. */
 export async function importEmployees(
   rows: RawRow[],
-  { dryRun, names = DistrictNames.load() }: { dryRun: boolean; names?: DistrictNames },
+  {
+    dryRun,
+    names = DistrictNames.load(),
+    source,
+  }: { dryRun: boolean; names?: DistrictNames; source?: ImportSource },
 ): Promise<ImportResult> {
   await connectDb();
   const plan = validateRows(rows);
+  const startedAt = new Date();
 
   const existing = new Map(
     (
       await User.find({ ajeerCode: { $in: plan.valid.map((r) => r.ajeerCode) } })
-        .select('ajeerCode isDemo mobile role department provisioned')
+        .select('ajeerCode isDemo mobile role zimmedari unitCode department provisioned')
         .lean()
     ).map((u) => [u.ajeerCode, u]),
   );
@@ -407,6 +444,28 @@ export async function importEmployees(
   }
   const fillsMobile = (row: ValidRow) => !!row.mobile && !existing.get(row.ajeerCode)?.mobile;
 
+  const changes: ImportResult['changes'] = [];
+  for (const { row, unit } of assignments) {
+    const known = existing.get(row.ajeerCode);
+    if (!known) continue;
+    const compare: [string, string | null | undefined, string | undefined][] = [
+      ['role', known.role, row.role],
+      ['zimmedari', known.zimmedari, row.zimmedari],
+      ['unit', known.unitCode, unit.code],
+    ];
+    for (const [field, from, to] of compare) {
+      if ((from ?? '') !== (to ?? '')) {
+        changes.push({
+          row: row.row,
+          ajeerCode: row.ajeerCode,
+          field,
+          from: from ?? '',
+          to: to ?? '',
+        });
+      }
+    }
+  }
+
   const result: ImportResult = {
     dryRun,
     rows: rows.length,
@@ -418,6 +477,7 @@ export async function importEmployees(
     sameCode: plan.sameCode,
     otherSuffix: plan.otherSuffix,
     mobileConflicts,
+    changes,
   };
   if (dryRun) return result;
 
@@ -454,9 +514,16 @@ export async function importEmployees(
               ...(row.zimmedari ? { zimmedari: row.zimmedari } : {}),
               unitCode: unit.code,
               unitPath: unit.path,
+              hrImport: {
+                ...(source ? { file: source.file } : {}),
+                row: row.row,
+                at: startedAt,
+              },
             },
+            // Never touched here: password, mustChangePassword (except for a new account),
+            // isActive, mobile / mobileVerified / mobileChange, permissions, department.
             ...(row.zimmedari ? {} : { $unset: { zimmedari: '' } }),
-            // Only for new users: first password 123 + forced change. Existing passwords stay.
+            // Only for new users: first password (INITIAL_PASSWORD) + forced change. Existing passwords stay.
             $setOnInsert: {
               passwordHash,
               mustChangePassword: true,
@@ -486,6 +553,22 @@ export async function importEmployees(
       );
     }
   }
+  // One audit entry per real run: counts only — no names, mobiles or passwords.
+  await audit({
+    action: 'IMPORT_EMPLOYEES',
+    actorAjeerCode: source?.operator ?? 'import',
+    targetType: 'import',
+    details: {
+      ...(source ? { file: source.file } : {}),
+      rows: result.rows,
+      created: result.created,
+      updated: result.updated,
+      newUnits: result.newUnits.length,
+      rejected: result.errors.length,
+      changes: result.changes.length,
+      mobileConflicts: result.mobileConflicts.length,
+    },
+  });
   return result;
 }
 
@@ -524,7 +607,7 @@ export async function writeEmployeeReport(result: ImportResult, file: string): P
     ),
   );
   sheet(
-    'Code 2, 3',
+    'Code 2, 3 - rukay hue',
     ['Row', 'Poora code', 'Naam', 'Zimmedari', 'District', 'Import hua?'],
     result.otherSuffix.map((r) => [
       r.row,
@@ -544,6 +627,11 @@ export async function writeEmployeeReport(result: ImportResult, file: string): P
     'Naye units',
     ['Level', 'Naam', 'Path'],
     result.newUnits.map((u) => [u.level, u.name, u.path]),
+  );
+  sheet(
+    'Tabdeeliyan',
+    ['Row', 'Ajeer code', 'Kya badla', 'Pehle', 'Ab'],
+    result.changes.map((c) => [c.row, c.ajeerCode, c.field, c.from, c.to]),
   );
   await wb.xlsx.writeFile(file);
 }

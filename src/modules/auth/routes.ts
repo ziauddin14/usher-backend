@@ -3,13 +3,27 @@ import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
 import {
   clearSessionCookie,
   currentUser,
+  requireAuth,
   requireSession,
   setSessionCookie,
   signSession,
 } from '../../lib/auth.js';
 import { AppError, parse } from '../../lib/errors.js';
-import { changePasswordSchema, forgotPasswordSchema, loginSchema } from './schemas.js';
-import { changePassword, login, publicUser, requestPasswordReset } from './service.js';
+import {
+  changePasswordSchema,
+  forgotPasswordSchema,
+  loginSchema,
+  mobileChangeSchema,
+} from './schemas.js';
+import {
+  cancelMobileChange,
+  changePassword,
+  login,
+  ownMobile,
+  publicUser,
+  requestMobileChange,
+  requestPasswordReset,
+} from './service.js';
 
 const FIFTEEN_MINUTES = 15 * 60 * 1000;
 
@@ -91,6 +105,23 @@ export function authRouter(): Router {
   router.post('/change-password', requireSession, async (req, res) => {
     const { currentPassword, newPassword } = parse(changePasswordSchema, req.body);
     await changePassword(currentUser(req), currentPassword, newPassword);
+    res.json({ ok: true });
+  });
+
+  // Own mobile and a later change of it (confirmed by the user's verifier, CTO 7 Nov 2026).
+  // requireAuth: not while a password change is pending.
+  router.get('/mobile', requireAuth, async (req, res) => {
+    res.set('Cache-Control', 'no-store').json(await ownMobile(currentUser(req)));
+  });
+
+  router.post('/mobile-change', requireAuth, async (req, res) => {
+    const { mobile } = parse(mobileChangeSchema, req.body);
+    await requestMobileChange(currentUser(req), mobile);
+    res.json({ ok: true });
+  });
+
+  router.delete('/mobile-change', requireAuth, async (req, res) => {
+    await cancelMobileChange(currentUser(req));
     res.json({ ok: true });
   });
 
