@@ -153,9 +153,13 @@ Ajeer Codes written `/2`, `/3` … are **held**: never imported, listed on the r
 - **Gaon** stay owned by the District (`village.unitPath` = District path). Every Gaon check uses
   `districtPathOf()` / `districtCodeOf()` (`src/lib/scope.ts`), never path equality. A Tehsil
   sees the villages assigned to its own Ushar, never the District pool.
-- **Official duty** approver map (`DUTY_APPROVER` in `src/modules/jadwals/duty.ts`): Ushar and
-  Tehsil → District, District → Division, Division → Suba; Suba / Pakistan: none in Demo v1.
-- Gaon import: a Tehsil Zimmedar's code in the Gaon file → District pool (like a District user).
+- **Official duty** approver map (`DUTY_APPROVER` in `src/modules/jadwals/duty.ts`): Ushar →
+  District, District → Division, Division → Suba. Tehsil: no approved duty workflow (403);
+  Suba / Pakistan: none in Demo v1.
+- Gaon import (CTO 9 Nov 2026): a Tehsil Zimmedar's code in the Gaon file → the District pool of
+  the file's District (never assigned to the Tehsil or to any Ushar automatically; the District
+  assigns it to an active Ushar Zimmedar through the normal workflow). District farq and the other
+  exception rules apply to Tehsil codes as before.
 
 ## Import rules added 9 Nov 2026 (CTO)
 

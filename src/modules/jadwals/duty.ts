@@ -14,15 +14,14 @@ import { type Role, User } from '../../models/user.js';
 
 /**
  * Who decides official duty for a mashwara, by the owner's role — an explicit map, never the role
- * rank (CTO 9 Nov 2026: a Tehsil sits between District and Ushar, but an Ushar Zimmedar's duty is
- * still decided by the District, and so is a Tehsil Zimmedar's own):
- *   zimmedar ← District · tehsil ← District · district ← Division · division ← Suba (in scope).
- *   suba / pakistan owners: no approver is authorized (supervisors do not file jadwals) → 403.
- * Never self, never any other level (a Tehsil never approves).
+ * rank (approved matrix, CTO 9 Nov 2026):
+ *   zimmedar (Ushar) ← District · district ← Division · division ← Suba (in scope).
+ *   tehsil: no approved duty workflow → 403 (none is inferred).
+ *   suba / pakistan owners: no approver in Demo v1 → 403.
+ * Never self, never any other level (a Tehsil never approves: not one of the approvers).
  */
 export const DUTY_APPROVER: Partial<Record<Role, Role>> = {
   zimmedar: 'district',
-  tehsil: 'district',
   district: 'division',
   division: 'suba',
 };

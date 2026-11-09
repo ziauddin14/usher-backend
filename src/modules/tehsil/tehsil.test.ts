@@ -97,6 +97,7 @@ beforeAll(async () => {
     district: await loginCookie(app, '9040001'),
     division: await loginCookie(app, '9030001'),
     z1: await loginCookie(app, z1.code),
+    z2: await loginCookie(app, z2.code),
   };
 });
 
@@ -270,9 +271,9 @@ describe('a Tehsil changes nothing; official duty stays with the District', () =
     await expect(setUserStatus(t1, z1.id, false)).rejects.toMatchObject({ status: 403 });
   });
 
-  it('an Ushar Zimmedar under a Tehsil: duty is decided by the District, never the Tehsil', () => {
-    expect(DUTY_APPROVER.zimmedar).toBe('district');
-    expect(DUTY_APPROVER.tehsil).toBe('district');
+  it('the approved duty matrix: Ushar ← District, District ← Division, Division ← Suba; Tehsil none', () => {
+    expect(DUTY_APPROVER).toEqual({ zimmedar: 'district', district: 'division', division: 'suba' });
+    expect(DUTY_APPROVER.tehsil).toBeUndefined();
     const caller = (role: AuthUser['role']): AuthUser => ({
       id: 'caller',
       ajeerCode: '1',
@@ -286,8 +287,122 @@ describe('a Tehsil changes nothing; official duty stays with the District', () =
     expect(() => assertDutyApprover(caller('district'), owner)).not.toThrow();
     expect(() => assertDutyApprover(caller('tehsil'), owner)).toThrow(/directly above/);
     expect(() => assertDutyApprover(caller('division'), owner)).toThrow(/directly above/);
-    expect(() =>
-      assertDutyApprover(caller('district'), { _id: tehsil1Id, role: 'tehsil' }),
-    ).not.toThrow();
+    // Unchanged for the other levels.
+    const district = { _id: 'd', role: 'district' as const };
+    const division = { _id: 'v', role: 'division' as const };
+    expect(() => assertDutyApprover(caller('division'), district)).not.toThrow();
+    expect(() => assertDutyApprover(caller('district'), district)).toThrow(/directly above/);
+    expect(() => assertDutyApprover(caller('suba'), division)).not.toThrow();
+    expect(() => assertDutyApprover(caller('suba'), { _id: 's', role: 'suba' })).toThrow(
+      /No official-duty approver/,
+    );
+    // A Tehsil owner has no approved duty workflow: nobody may approve.
+    for (const role of ['district', 'division', 'suba', 'pakistan', 'tehsil'] as const) {
+      expect(() => assertDutyApprover(caller(role), { _id: tehsil1Id, role: 'tehsil' })).toThrow(
+        /No official-duty approver/,
+      );
+    }
+  });
+
+  it('API: a Tehsil cannot decide the duty of its own Ushar; the District still can', async () => {
+    const res = await post('z2', '/jadwals', { entryType: 'mashwara_full' }).expect(201);
+    const id = res.body.jadwal.id as string;
+    expect(res.body.jadwal).toMatchObject({ status: 'submitted', dutyApproval: null });
+    const t = await post('t1', `/jadwals/${id}/duty-approval`, {
+      decision: 'approve',
+      expected: null,
+    }).expect(403);
+    expect(t.body.error.code).toBe('FORBIDDEN');
+    const d = await post('district', `/jadwals/${id}/duty-approval`, {
+      decision: 'approve',
+      expected: null,
+    }).expect(200);
+    expect(d.body.dutyApproval).toMatchObject({ status: 'approved', byAjeerCode: '9040001' });
+  });
+});
+
+describe('Tehsil Zimmedar Gaon go to the District pool (CTO 9 Nov 2026)', () => {
+  const rows: VillageRow[] = [
+    // A Tehsil Zimmedar's code: District pool of the file's District, never assigned.
+    {
+      row: 2,
+      values: { village: 'گوٹھ تحصیل پول درآمد', district: 'Ghotki', zimmedarCode: '9060002' },
+    },
+    // The same Tehsil Zimmedar with another District in the file: District farq (unchanged rule).
+    {
+      row: 3,
+      values: { village: 'گوٹھ تحصیل ضلع فرق', district: 'Larkana', zimmedarCode: '9060002' },
+    },
+    // Exceptions unchanged: an unknown District, an unknown code.
+    {
+      row: 4,
+      values: { village: 'گوٹھ تحصیل نامعلوم', district: 'Atlantis', zimmedarCode: '9060002' },
+    },
+    { row: 5, values: { village: 'گوٹھ تحصیل بے کوڈ', district: 'Ghotki', zimmedarCode: '55555' } },
+  ];
+  let poolId: string;
+
+  beforeAll(async () => {
+    const r = await importVillages(rows, { dryRun: false });
+    expect(r.districtPool.map((u) => [u.row, u.district])).toEqual([[2, 'Ghotki']]);
+    expect(r.districtPool[0]!.problem).toBe('Ajeer code 9060002 is a tehsil user → district pool');
+    expect(r.districtMismatch.map((u) => u.row)).toEqual([3]);
+    expect(r.unmatchedVillages.map((u) => u.row)).toEqual([4]);
+    expect(r.unmatchedZimmedar.map((u) => u.row)).toEqual([5]);
+    expect(r.assigned).toBe(0);
+    poolId = String((await Village.findOne({ nameKey: 'تحصیل پول درآمد' }).lean())!._id);
+  });
+
+  it('enters the pool of the correct District, unassigned, with its source row', async () => {
+    const v = await Village.findById(poolId).lean();
+    expect(v).toMatchObject({
+      unitPath: GHOTKI,
+      districtCode: 'GHOTKI',
+      status: 'approved',
+      source: { kind: 'import', row: 2 },
+    });
+    expect(v!.assignedTo).toBeUndefined();
+    expect(await Village.exists({ nameKey: 'تحصیل ضلع فرق' })).toBeNull();
+    expect(await Village.exists({ nameKey: 'تحصیل نامعلوم' })).toBeNull();
+  });
+
+  it('is visible in the District pool to the District (and the Division), never to the Tehsil', async () => {
+    const district = await get('district', '/dash/units/GHOTKI/villages').expect(200);
+    expect((district.body.pool as { id: string }[]).map((p) => p.id)).toContain(poolId);
+    const division = await get('division', '/dash/units/GHOTKI/villages').expect(200);
+    expect((division.body.pool as { id: string }[]).map((p) => p.id)).toContain(poolId);
+    const tehsil = await get('t2', '/villages').expect(200);
+    expect((tehsil.body.villages as { id: string }[]).map((v) => v.id)).not.toContain(poolId);
+    await get('t2', '/dash/units/GHOTKI/villages').expect(404);
+  });
+
+  it('a Tehsil cannot own, add or assign Gaon', async () => {
+    const t2 = (await User.findOne({ ajeerCode: '9060002' }).lean())!;
+    // The District cannot give a Gaon to a Tehsil Zimmedar (only an active Ushar Zimmedar).
+    await post('district', `/villages/${poolId}/assign`, { userId: String(t2._id) }).expect(409);
+    await post('district', '/villages/manage', {
+      name: 'گوٹھ تحصیل کو نہیں',
+      assignTo: String(t2._id),
+    }).expect(409);
+    await post('t2', `/villages/${poolId}/assign`, { userId: z3.id }).expect(403);
+    await post('t2', '/villages', { name: 'گوٹھ تحصیل خود' }).expect(403);
+    await post('t2', '/villages/manage', { name: 'گوٹھ تحصیل خود' }).expect(403);
+    expect(await Village.countDocuments({ assignedTo: t2._id })).toBe(0);
+  });
+
+  it('only an active Ushar Zimmedar of the District receives it', async () => {
+    const division = (await User.findOne({ ajeerCode: '9030001' }).lean())!;
+    const districtUser = (await User.findOne({ ajeerCode: '9040001' }).lean())!;
+    for (const u of [division, districtUser]) {
+      await post('district', `/villages/${poolId}/assign`, { userId: String(u._id) }).expect(409);
+    }
+    await post('district', `/villages/${poolId}/assign`, { userId: larkanaZimmedarId }).expect(409);
+    await User.updateOne({ _id: z2.id }, { $set: { isActive: false } });
+    await post('district', `/villages/${poolId}/assign`, { userId: z2.id }).expect(409);
+    await User.updateOne({ _id: z2.id }, { $set: { isActive: true } });
+    expect((await Village.findById(poolId).lean())!.assignedTo).toBeUndefined();
+    // The existing workflow: the District assigns it to an Ushar Zimmedar under its Tehsil.
+    await post('district', `/villages/${poolId}/assign`, { userId: z3.id }).expect(200);
+    expect(String((await Village.findById(poolId).lean())!.assignedTo)).toBe(z3.id);
   });
 });
