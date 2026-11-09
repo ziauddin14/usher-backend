@@ -96,6 +96,11 @@ export interface ValidRow {
   mobile?: string;
   /** HR Town / Tehsil, as written. */
   town?: string;
+  /**
+   * The District written on a Division / Suba official's verified row (and, for a Suba official, the
+   * Division too). Used only to create that District unit — never an account (CTO 9 Nov 2026).
+   */
+  officialDistrict?: { division: string; district: string };
 }
 
 /** An eligible employee not imported now (CTO 9 Nov 2026) — listed on its own report sheet. */
@@ -174,6 +179,11 @@ export interface ImportResult {
   unknownDesignations: UnknownDesignation[];
   /** Not imported now (CTO 9 Nov 2026): Tehsil role pending / no Tehsil parent. */
   onHold: HeldEmployee[];
+  /** District units that exist only because a Division / Suba official's row names them. */
+  officialDistrictUnits: { code: string; name: string; path: string }[];
+  /** District values on official rows that are neither an existing unit nor in district-names.csv:
+   *  no unit created — listed for confirmation. */
+  officialDistrictUnconfirmed: { row: number; suba: string; division: string; district: string }[];
 }
 
 /** Who ran an import and from which file (kept on the accounts and in the audit log). */
@@ -298,6 +308,10 @@ export function validateRows(rows: RawRow[]): ImportPlan {
       ...(mapped.role === 'zimmedar' || mapped.role === 'district' ? { district: district! } : {}),
       ...(mobile ? { mobile } : {}),
       ...(clean(values.town) ? { town: clean(values.town)! } : {}),
+      // A Division / Suba official's own District value (both Division and District present).
+      ...((mapped.role === 'division' || mapped.role === 'suba') && division && district
+        ? { officialDistrict: { division, district } }
+        : {}),
     });
   }
   // Holds (CTO 9 Nov 2026), decided only from verified HR data — never inferred:
@@ -437,6 +451,16 @@ class UnitResolver {
     return this.create(roman ?? bare, level, parent, undefined, roman ? bare : undefined);
   }
 
+  /**
+   * True when the unit already exists, or its name (with its Urdu chain) is in the verified
+   * district-names.csv — i.e. creating it is not a guess from an unconfirmed name.
+   */
+  isConfirmed(name: string, level: UnitLevel, parent: UnitRef, urduChain: string[]): boolean {
+    const roman = hasUrduScript(name) ? this.names?.romanFor(level, urduChain) : undefined;
+    if (roman) return true;
+    return [name].some((n) => this.byParentAndKey.has(`${parent.code}|${unitKey(n)}`));
+  }
+
   private create(
     name: string,
     level: UnitLevel,
@@ -547,6 +571,32 @@ export async function importEmployees(
   for (const h of plan.onHold) {
     units.unitFor({ ...h, ajeerCodeFull: h.ajeerCode, name: '', role: 'zimmedar' });
   }
+  // District units written on authorized Division / Suba officials' verified rows (CTO 9 Nov 2026):
+  // the District unit exists even when no District-level employee does; nobody is made its
+  // responsible person. A Suba row needs its Division as well, else nothing is created.
+  const beforeOfficial = units.created.length;
+  const officialUnconfirmed: ImportResult['officialDistrictUnconfirmed'] = [];
+  for (const row of toImport) {
+    if (!row.officialDistrict) continue;
+    const { division: div, district: dist } = row.officialDistrict;
+    const subaRef = units.resolve(row.suba, 'suba', units.root(), [row.suba]);
+    const divRef = units.resolve(div, 'division', subaRef, [row.suba, div]);
+    // Only a confirmed name: an existing unit or one listed in district-names.csv.
+    if (!units.isConfirmed(dist, 'district', divRef, [row.suba, div, dist])) {
+      officialUnconfirmed.push({ row: row.row, suba: row.suba, division: div, district: dist });
+      continue;
+    }
+    units.unitFor({
+      ...row,
+      role: 'zimmedar',
+      division: row.officialDistrict.division,
+      district: row.officialDistrict.district,
+    });
+  }
+  const officialDistrictUnits = units.created
+    .slice(beforeOfficial)
+    .filter((u) => u.level === 'district')
+    .map(({ code, name, path }) => ({ code, name, path }));
   // A number already on record (from an earlier import, the KPI file or typed by the user) is
   // never overwritten; only users without one get the file's number.
   const mobileConflicts: ImportResult['mobileConflicts'] = [];
@@ -597,6 +647,8 @@ export async function importEmployees(
     otherSuffix: plan.otherSuffix,
     unknownDesignations: plan.unknownDesignations,
     onHold: plan.onHold,
+    officialDistrictUnits,
+    officialDistrictUnconfirmed: officialUnconfirmed,
     mobileConflicts,
     changes,
   };
@@ -770,6 +822,16 @@ export async function writeEmployeeReport(result: ImportResult, file: string): P
         .map((h) => [h.row, h.ajeerCode, h.district, h.town]),
     );
   heldSheet('Tehsil role pending', 'TEHSIL_ROLE_PENDING');
+  sheet(
+    'District - tasdeeq baqi',
+    ['Row', 'Suba', 'Division', 'District (official record)'],
+    result.officialDistrictUnconfirmed.map((u) => [u.row, u.suba, u.division, u.district]),
+  );
+  sheet(
+    'District - official record',
+    ['District', 'Path', 'Responsible account'],
+    result.officialDistrictUnits.map((u) => [u.name, u.path, '(none — blank)']),
+  );
   heldSheet('Tehsil parent nahi', 'NO_TEHSIL_PARENT');
   sheet(
     'Designation - tasdeeq',

@@ -680,3 +680,80 @@ describe('HR units, Metropolitan separation and the Division Ushar mapping (CTO 
     expect(again.newUnits).toEqual([]);
   });
 });
+
+describe('District units from authorized Division / Suba officials (CTO 9 Nov 2026)', () => {
+  let tmp: string;
+  beforeAll(async () => {
+    tmp = await mkdtemp(join(tmpdir(), 'ushr-official-'));
+    await seedDemo({ reset: true });
+  });
+  afterAll(async () => {
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it('creates the District named on a verified official row — no account, blank responsible; never from unauthorized or ambiguous rows', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('HR');
+    ws.addRow(HEADER);
+    // Division official whose District value is Sargodha Metropolitan.
+    ws.addRow([
+      '883001',
+      'Invented Div',
+      '',
+      'سرکاری ڈویژن ذمہ دار',
+      'پنجاب',
+      'سرگودھا',
+      'سرگودھا میٹرو پولیٹین',
+      '',
+    ]);
+    // Ordinary Sargodha from a District official.
+    ws.addRow(['883002', 'Invented Dist', '', 'ڈسٹرکٹ ذمہ دار', 'پنجاب', 'سرگودھا', 'سرگودھا', '']);
+    // Suba official without a Division: ambiguous → no District unit.
+    ws.addRow(['883003', 'Invented Suba', '', 'صوبائی ذمہ دار', 'پنجاب', '', 'خوشاب', '']);
+    // Division official naming a District that is neither a unit nor in district-names.csv.
+    ws.addRow([
+      '883005',
+      'Invented Div Two',
+      '',
+      'سرکاری ڈویژن ذمہ دار',
+      'پنجاب',
+      'سرگودھا',
+      'فرضی ضلع',
+      '',
+    ]);
+    // Office staff (no authorized role): rejected, creates nothing.
+    ws.addRow(['883004', 'Invented Office', '', 'آفس ذمہ دار', 'پنجاب', 'سرگودھا', 'میانوالی', '']);
+    const path = join(tmp, 'officials.xlsx');
+    await wb.xlsx.writeFile(path);
+
+    const dry = await importEmployees(await readEmployeeSheet(path), { dryRun: true });
+    const real = await importEmployees(await readEmployeeSheet(path), { dryRun: false });
+    expect(dry.officialDistrictUnits).toEqual(real.officialDistrictUnits);
+    expect(real.officialDistrictUnits.map((u) => u.name)).toEqual(['Sargodha Metropolitan']);
+    const districts = await Unit.find({
+      level: 'district',
+      name: { $in: ['Sargodha', 'Sargodha Metropolitan', 'Khushab', 'Mianwali'] },
+    })
+      .select('name path')
+      .lean();
+    expect(districts.map((d) => d.name).sort()).toEqual(['Sargodha', 'Sargodha Metropolitan']);
+    const metro = districts.find((d) => d.name === 'Sargodha Metropolitan')!;
+    // No responsible account in that District: the Division official stays a Division account.
+    expect(await User.countDocuments({ unitPath: metro.path })).toBe(0);
+    expect(await User.findOne({ ajeerCode: '883001' }).lean()).toMatchObject({ role: 'division' });
+    expect(await User.exists({ ajeerCode: '883004' })).toBeNull();
+    expect(real.created).toBe(4);
+    // Unconfirmed name: no unit, listed for confirmation.
+    expect(real.officialDistrictUnconfirmed.map((u) => u.district)).toEqual(['فرضی ضلع']);
+    expect(await Unit.exists({ level: 'district', name: { $regex: 'فرضی' } })).toBeNull();
+
+    const out = join(tmp, 'report.xlsx');
+    await writeEmployeeReport(real, out);
+    const rb = new ExcelJS.Workbook();
+    await rb.xlsx.readFile(out);
+    expect(rb.getWorksheet('District - tasdeeq baqi')!.rowCount).toBe(2);
+    const sheet = rb.getWorksheet('District - official record')!;
+    expect(sheet.rowCount).toBe(2);
+    expect(sheet.getRow(2).getCell(3).text).toBe('(none — blank)');
+  });
+});
