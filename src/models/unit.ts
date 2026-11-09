@@ -1,6 +1,7 @@
 import mongoose, { type InferSchemaType, type Model, Schema } from 'mongoose';
 
-export const UNIT_LEVELS = ['pakistan', 'suba', 'division', 'district'] as const;
+/** Pakistan → Suba → Division → District → Tehsil (CTO 9 Nov 2026: Tehsil is a real unit level). */
+export const UNIT_LEVELS = ['pakistan', 'suba', 'division', 'district', 'tehsil'] as const;
 export type UnitLevel = (typeof UNIT_LEVELS)[number];
 
 const unitSchema = new Schema(

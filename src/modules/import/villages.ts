@@ -7,6 +7,7 @@ import { fullAjeerCode, normalizeAjeerCode } from '../../lib/ajeer-code.js';
 import { audit } from '../../lib/audit.js';
 import { connectDb } from '../../lib/db.js';
 import { DistrictNames } from '../../lib/district-names.js';
+import { districtPathOf } from '../../lib/scope.js';
 import { villageNameKey } from '../../lib/text.js';
 import { HELD_SUFFIX } from './employees.js';
 import { unitKey } from '../../lib/unit-name.js';
@@ -105,7 +106,7 @@ export interface VillageImportResult {
   heldCode: UnmatchedRow[];
   /** Rows naming an employee the HR import rejected (e.g. designation not confirmed). */
   notImportedEmployee: UnmatchedRow[];
-  /** Rows naming an employee on hold (Tehsil role pending / no Tehsil parent): never assigned. */
+  /** Rows naming an employee on hold (no verified Tehsil parent): never assigned. */
   employeeOnHold: UnmatchedRow[];
   /** Rows whose District differs from the named employee's own district: not imported. */
   districtMismatch: UnmatchedRow[];
@@ -115,7 +116,7 @@ export interface VillageImportResult {
 export interface HrCodes {
   held: Set<string>;
   rejected: Set<string>;
-  /** Employees not imported now: Tehsil role pending / no Tehsil parent (CTO 9 Nov 2026). */
+  /** Employees not imported now: no verified Tehsil parent (CTO 9 Nov 2026). */
   onHold?: Set<string>;
   /** HR District (as written) of each employee on hold. */
   districtOf?: Map<string, string>;
@@ -246,8 +247,9 @@ export async function importVillages(
       }
     }
     let userDistrict: { code: string; path: string } | undefined;
-    if (user && (user.role === 'zimmedar' || user.role === 'district')) {
-      const d = districtByPath.get(user.unitPath);
+    if (user && (user.role === 'zimmedar' || user.role === 'tehsil' || user.role === 'district')) {
+      // A zimmedar under a Tehsil belongs to that Tehsil's District (districtPathOf).
+      const d = districtByPath.get(districtPathOf(user.unitPath) ?? user.unitPath);
       if (d) userDistrict = { code: d.code, path: d.path };
     }
     const outsideUser =
@@ -298,9 +300,7 @@ export async function importVillages(
       heldCode.push(report(`Ajeer code ${codeFull || code} is held (/2, /3) — CTO decides`));
     } else if (onHoldCode) {
       employeeOnHold.push(
-        report(
-          `Ajeer code ${code} is on hold in the HR import (Tehsil role pending / no Tehsil parent)`,
-        ),
+        report(`Ajeer code ${code} is on hold in the HR import (no verified Tehsil parent)`),
       );
     } else if (rejected) {
       notImportedEmployee.push(
@@ -310,7 +310,7 @@ export async function importVillages(
       if (!user) zimmedarProblem = `Ajeer code ${code} not found (import employees first)`;
       else if (user.role !== 'zimmedar') {
         poolReason = `Ajeer code ${code} is a ${user.role} user → district pool`;
-      } else if (user.unitPath !== district.path) {
+      } else if (districtPathOf(user.unitPath) !== district.path) {
         zimmedarProblem = `Ajeer code ${code} belongs to another district`;
       } else assignee = { id: String(user._id), label: `${user.ajeerCode} ${user.name}` };
     } else if (codeText) {

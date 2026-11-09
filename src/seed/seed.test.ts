@@ -21,13 +21,36 @@ describe('seedDemo', () => {
   });
 
   it('creates the 5 demo logins and ~60 invented zimmedaran', async () => {
-    for (const code of ['9010001', '9020001', '9030001', '9040001', '9090412']) {
+    for (const code of ['9010001', '9020001', '9030001', '9040001', '9090412', '9050001']) {
       expect(await User.exists({ ajeerCode: code })).toBeTruthy();
     }
     const zimmedaran = await User.countDocuments({ role: 'zimmedar' });
     expect(zimmedaran).toBeGreaterThanOrEqual(55);
     expect(zimmedaran).toBeLessThanOrEqual(80);
     expect(await User.countDocuments({ role: 'zimmedar', unitCode: 'GHOTKI' })).toBe(10);
+  });
+
+  it('has one demo Tehsil: Khairpur Ushar under it, its login, villages still on the District', async () => {
+    expect((await Unit.findOne({ code: 'KHAIRPUR_TOWN' }).lean())?.path).toBe(
+      'PK/INT_SINDH/SUKKUR/KHAIRPUR/KHAIRPUR_TOWN',
+    );
+    expect(await User.findOne({ ajeerCode: '9050001' }).lean()).toMatchObject({
+      role: 'tehsil',
+      unitPath: 'PK/INT_SINDH/SUKKUR/KHAIRPUR/KHAIRPUR_TOWN',
+    });
+    expect(await User.countDocuments({ role: 'zimmedar', unitCode: 'KHAIRPUR' })).toBe(0);
+    const khairpur = await User.find({ role: 'zimmedar', unitCode: 'KHAIRPUR_TOWN' }).lean();
+    expect(khairpur.length).toBeGreaterThanOrEqual(2);
+    expect(
+      await Village.countDocuments({
+        districtCode: 'KHAIRPUR',
+        unitPath: { $ne: 'PK/INT_SINDH/SUKKUR/KHAIRPUR' },
+      }),
+    ).toBe(0);
+    // Every Khairpur village is assigned to one of the Tehsil's Ushar Zimmedaran.
+    const ids = new Set(khairpur.map((u) => String(u._id)));
+    const villages = await Village.find({ districtCode: 'KHAIRPUR' }).lean();
+    expect(villages.every((v) => ids.has(String(v.assignedTo)))).toBe(true);
   });
 
   it('seeds 8–15 villages per district', async () => {

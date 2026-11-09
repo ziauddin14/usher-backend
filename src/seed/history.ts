@@ -5,6 +5,7 @@
 import { Types } from 'mongoose';
 import { assertDemoDb } from '../lib/databases.js';
 import { env } from '../lib/env.js';
+import { districtPathOf } from '../lib/scope.js';
 import { getRewardRules, getSettings } from '../lib/settings.js';
 import { addDays, karachiDate } from '../lib/time.js';
 import { Jadwal } from '../models/jadwal.js';
@@ -219,7 +220,10 @@ export async function seedHistory(
     const villages: SeedVillage[] =
       own.length > 0
         ? own
-        : await Village.find({ unitPath: z.unitPath, status: 'approved' })
+        : await Village.find({
+            unitPath: districtPathOf(z.unitPath) ?? z.unitPath,
+            status: 'approved',
+          })
             .select('_id name')
             .lean();
     if (villages.length === 0) continue;

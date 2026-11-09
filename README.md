@@ -51,8 +51,9 @@ has no static IP).
 - `ushr_demo` holds only invented seed data; `ushr_live` only the real imports. The seed refuses a
   live database; imports write only to `LIVE_MONGODB_URI`; admin CLIs need `--db` and `--confirm`.
 - Real files go in `private/` (git-ignored) and are never committed. Never commit `.env`.
-- Demo logins (password `demo1234`): 9090412 zimmedar, 9040001 district, 9030001 division,
-  9020001 suba, 9010001 pakistan — all invented.
+- Demo logins (password `demo1234`): 9090412 zimmedar, 9050001 tehsil (Khairpur Town),
+  9040001 district, 9030001 division, 9020001 suba, 9010001 pakistan — all invented. The seed has
+  one demo Tehsil, `KHAIRPUR_TOWN` under District Khairpur, holding Khairpur's Ushar Zimmedaran.
 
 ## Real-data imports (HR employees, official Gaon list)
 
@@ -137,6 +138,29 @@ Ajeer Codes written `/2`, `/3` … are **held**: never imported, listed on the r
 - Covered for every role (zimmedar, district, division, suba, pakistan) by
   `src/modules/auth/first-login-roles.test.ts`.
 
+## Tehsil level (Phase 2, CTO 9 Nov 2026)
+
+- Hierarchy: Pakistan → Suba → Division → District → **Tehsil** → Ushar Zimmedar. Unit paths are
+  fixed depth: `PK/<suba>/<division>/<district>/<tehsil>`. An Ushar Zimmedar's `unitPath` is its
+  Tehsil; every higher level keeps prefix scope, so a District still sees all its Ushar.
+- HR import: `ٹاؤن /تحصیل ذمہ دار` (also "Tehsil", "Town", "Tehsil-Town") → role `tehsil`. Its
+  Tehsil unit comes from the exact District + Town of that row (the Town name is compared exactly,
+  level words are kept). Ushar rows point to that Tehsil; without one they stay held. Held rows
+  and officials' records create District units only, never a Tehsil. Password rules unchanged.
+- **Tehsil Zimmedar** (`tehsil`): read-only dashboards of its own Tehsil only (`DASHBOARD_ROLES`).
+  No password reset, no activate / deactivate, no reset requests, no Gaon management, no reopen,
+  no official-duty decision (`SUPERVISOR_ROLES` stays District and above; the services check too).
+- **Gaon** stay owned by the District (`village.unitPath` = District path). Every Gaon check uses
+  `districtPathOf()` / `districtCodeOf()` (`src/lib/scope.ts`), never path equality. A Tehsil
+  sees the villages assigned to its own Ushar, never the District pool.
+- **Official duty** approver map (`DUTY_APPROVER` in `src/modules/jadwals/duty.ts`): Ushar →
+  District, District → Division, Division → Suba. Tehsil: no approved duty workflow (403);
+  Suba / Pakistan: none in Demo v1.
+- Gaon import (CTO 9 Nov 2026): a Tehsil Zimmedar's code in the Gaon file → the District pool of
+  the file's District (never assigned to the Tehsil or to any Ushar automatically; the District
+  assigns it to an active Ushar Zimmedar through the normal workflow). District farq and the other
+  exception rules apply to Tehsil codes as before.
+
 ## Import rules added 9 Nov 2026 (CTO)
 
 - **No District fallback:** the Gaon file's District must map exactly (unit name or
@@ -145,8 +169,7 @@ Ajeer Codes written `/2`, `/3` … are **held**: never imported, listed on the r
 - **Metropolitan Districts** are separate units (e.g. Sargodha vs Sargodha Metropolitan, Faisalabad
   vs Faisalabad Metropolitan); "Metropolitan" is never dropped when names are compared.
 - `ڈویژن عشر ذمہ دار` → Ushar Zimmedar (`سرکاری ڈویژن ذمہ دار` stays Division).
-- **Holds** (HR `ٹاؤن` column): `ٹاؤن /تحصیل ذمہ دار` rows are not imported until the Tehsil role
-  exists ("Tehsil role pending"); an Ushar Zimmedar is imported only when the HR file has a
+- **Holds** (HR `ٹاؤن` column): an Ushar Zimmedar is imported only when the HR file has a
   Tehsil/Town Zimmedar for exactly the same District + Town, else held ("Tehsil parent nahi").
   Held employees get no account and no village ("Employee hold" in the Gaon report); their HR
   District still applies "District farq".

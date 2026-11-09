@@ -5,7 +5,7 @@ import { Types } from 'mongoose';
 import type { AuthUser } from '../../lib/auth.js';
 import { connectDb } from '../../lib/db.js';
 import { AppError } from '../../lib/errors.js';
-import { assertInScope, escapeRegex } from '../../lib/scope.js';
+import { assertInScope, districtPathOf, escapeRegex } from '../../lib/scope.js';
 import { getRewardRules, getSettings } from '../../lib/settings.js';
 import { karachiDate } from '../../lib/time.js';
 import { Jadwal } from '../../models/jadwal.js';
@@ -16,7 +16,7 @@ import { KPI_KEYS, type Kpis, periodRange } from '../me/service.js';
 import { periodFor, type RewardRules, rewardStatus } from '../reports/reward.js';
 import type { DashPeriod } from './schemas.js';
 
-const LEVEL_ORDER: UnitLevel[] = ['pakistan', 'suba', 'division', 'district'];
+const LEVEL_ORDER: UnitLevel[] = ['pakistan', 'suba', 'division', 'district', 'tehsil'];
 
 /** Submitted today (any entry type). */
 const SUBMITTED = new Set<TodayStatus>([
@@ -312,8 +312,9 @@ export async function childrenTable(
   date?: string,
 ) {
   const unit = await unitInScope(caller, code);
-  if (unit.level === 'district') {
-    throw new AppError(400, 'VALIDATION_FAILED', 'A district has no child units — use /zimmedaran');
+  // District and Tehsil dashboards list their Ushar Zimmedaran (/zimmedaran), as before.
+  if (unit.level === 'district' || unit.level === 'tehsil') {
+    throw new AppError(400, 'VALIDATION_FAILED', 'Use /zimmedaran for a district or a tehsil');
   }
   const children = await Unit.find({ parentCode: unit.code, isActive: true })
     .select('code name nameUr level path')
@@ -393,12 +394,25 @@ export async function zimmedarDays(caller: AuthUser, userId: string, month?: str
 export async function unitVillages(caller: AuthUser, code: string, month?: string) {
   const unit = await unitInScope(caller, code);
   const m = month ?? karachiDate().slice(0, 7);
-  const [users, villages, visited] = await Promise.all([
-    User.find({ role: 'zimmedar', isActive: true, unitPath: pathRegex(unit.path) })
-      .select('ajeerCode name nameUr unitCode')
-      .sort({ name: 1 })
-      .lean(),
-    Village.find({ unitPath: pathRegex(unit.path), status: { $in: ['approved', 'pending'] } })
+  const users = await User.find({
+    role: 'zimmedar',
+    isActive: true,
+    unitPath: pathRegex(unit.path),
+  })
+    .select('ajeerCode name nameUr unitCode')
+    .sort({ name: 1 })
+    .lean();
+  // Gaon are owned at District level. A Tehsil sees only the villages assigned to its own Ushar
+  // Zimmedaran — never the District pool or another Tehsil's villages (CTO 9 Nov 2026).
+  const isTehsil = unit.level === 'tehsil';
+  const villageFilter = isTehsil
+    ? {
+        unitPath: districtPathOf(unit.path) ?? unit.path,
+        assignedTo: { $in: users.map((u) => u._id) },
+      }
+    : { unitPath: pathRegex(unit.path) };
+  const [villages, visited] = await Promise.all([
+    Village.find({ ...villageFilter, status: { $in: ['approved', 'pending'] } })
       .select('name status assignedTo districtCode')
       .sort({ nameKey: 1 })
       .lean(),

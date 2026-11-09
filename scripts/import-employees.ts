@@ -47,7 +47,7 @@ async function main(): Promise<void> {
     `  mobile kept   : ${result.mobileConflicts.length} (different number in the file — sheet "Mobile farq")`,
   );
   console.warn(
-    `  on hold       : ${result.onHold.length} (Tehsil role pending ${result.onHold.filter((h) => h.reason === 'TEHSIL_ROLE_PENDING').length}, no Tehsil parent ${result.onHold.filter((h) => h.reason === 'NO_TEHSIL_PARENT').length})`,
+    `  on hold       : ${result.onHold.length} (Ushar without a verified Tehsil parent)`,
   );
   console.warn(`  rows rejected : ${result.errors.length}`);
   for (const e of result.errors.slice(0, 50)) {

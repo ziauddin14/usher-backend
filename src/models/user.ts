@@ -1,15 +1,20 @@
 import mongoose, { type InferSchemaType, type Model, Schema } from 'mongoose';
 
-export const ROLES = ['zimmedar', 'district', 'division', 'suba', 'pakistan'] as const;
+export const ROLES = ['zimmedar', 'tehsil', 'district', 'division', 'suba', 'pakistan'] as const;
 export type Role = (typeof ROLES)[number];
 
-/** Higher number = higher level in the hierarchy. */
+/**
+ * Higher number = higher level in the hierarchy (Pakistan → Suba → Division → District → Tehsil →
+ * Ushar Zimmedar). Only for "below me" listings — approvals and management use explicit rules
+ * (jadwals/duty.ts DUTY_APPROVER, auth.ts SUPERVISOR_ROLES), never the rank alone.
+ */
 export const ROLE_RANK: Record<Role, number> = {
   zimmedar: 0,
-  district: 1,
-  division: 2,
-  suba: 3,
-  pakistan: 4,
+  tehsil: 1,
+  district: 2,
+  division: 3,
+  suba: 4,
+  pakistan: 5,
 };
 
 export const ZIMMEDARI = ['ushar', 'tehsil_town', 'event'] as const;

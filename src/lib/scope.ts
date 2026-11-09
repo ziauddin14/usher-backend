@@ -23,6 +23,26 @@ export function scopeFilter(user: Scoped, field = 'unitPath'): Record<string, { 
   return { [field]: { $regex: `^${escapeRegex(user.unitPath)}(/|$)` } };
 }
 
+/** Segments of a District unit path: PK / suba / division / district. */
+const DISTRICT_DEPTH = 4;
+
+/**
+ * The District unit path at or above `unitPath` (PK/<suba>/<division>/<district>), or null above
+ * District level. Gaon are owned at District level; an Ushar Zimmedar under a Tehsil
+ * (…/<district>/<tehsil>) still works with the Gaon of their District. The one place that decides
+ * this — never compare a user's unitPath with a village's unitPath directly.
+ */
+export function districtPathOf(unitPath: string): string | null {
+  const parts = unitPath.split('/');
+  return parts.length >= DISTRICT_DEPTH ? parts.slice(0, DISTRICT_DEPTH).join('/') : null;
+}
+
+/** The District code of a District / Tehsil / Ushar unitPath (its fourth segment), or null. */
+export function districtCodeOf(unitPath: string): string | null {
+  const d = districtPathOf(unitPath);
+  return d ? d.split('/')[DISTRICT_DEPTH - 1]! : null;
+}
+
 /** Out-of-scope ids answer 404 so callers cannot probe other units. */
 export function assertInScope(user: Scoped, target: Scoped | null | undefined): asserts target {
   if (!target || !isInScope(user, target.unitPath)) {

@@ -6,7 +6,7 @@ import { audit } from '../../lib/audit.js';
 import type { AuthUser } from '../../lib/auth.js';
 import { connectDb } from '../../lib/db.js';
 import { AppError } from '../../lib/errors.js';
-import { assertInScope, scopeFilter } from '../../lib/scope.js';
+import { assertInScope, districtPathOf, scopeFilter } from '../../lib/scope.js';
 import { looseVillageKey, villageNameKey } from '../../lib/text.js';
 import { Unit } from '../../models/unit.js';
 import { User } from '../../models/user.js';
@@ -159,7 +159,8 @@ export async function assignVillage(caller: AuthUser, id: string, userId: string
         .select('ajeerCode name unitPath')
         .lean()
     : null;
-  if (!target || target.unitPath !== village.unitPath) {
+  // A zimmedar of the village's District — directly or under one of its Tehsils.
+  if (!target || districtPathOf(target.unitPath) !== village.unitPath) {
     throw new AppError(409, 'CONFLICT', 'Only an active zimmedar of the village’s district');
   }
   const from = village.assignedTo ? String(village.assignedTo) : null;
@@ -203,7 +204,7 @@ async function zimmedarOf(districtPath: string, userId: string) {
         .select('ajeerCode name unitPath')
         .lean()
     : null;
-  if (!target || target.unitPath !== districtPath) {
+  if (!target || districtPathOf(target.unitPath) !== districtPath) {
     throw new AppError(409, 'CONFLICT', 'Only an active zimmedar of the village’s district');
   }
   return target;
