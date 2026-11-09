@@ -50,8 +50,10 @@ describe('GET /users (supervisor-only, scoped)', () => {
     const res = await request(app).get('/api/v1/users').set('Cookie', cookie).expect(200);
     const users = res.body.users as ListedUser[];
     expect(new Set(users.map((u) => u.unitCode))).toEqual(
-      new Set(['GHOTKI', 'SUKKUR_DIST', 'KHAIRPUR']),
+      // Khairpur's Ushar and its Tehsil login sit under the demo Tehsil KHAIRPUR_TOWN.
+      new Set(['GHOTKI', 'SUKKUR_DIST', 'KHAIRPUR_TOWN']),
     );
+    expect(users.some((u) => u.role === 'tehsil' && u.ajeerCode === '9050001')).toBe(true);
     expect(users.some((u) => u.role === 'district')).toBe(true);
     expect(users.some((u) => u.role === 'division')).toBe(false);
   });

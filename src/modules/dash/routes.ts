@@ -1,14 +1,17 @@
 import { Router } from 'express';
-import { currentUser, requireAuth, requireRole, SUPERVISOR_ROLES } from '../../lib/auth.js';
+import { currentUser, DASHBOARD_ROLES, requireAuth, requireRole } from '../../lib/auth.js';
 import { parse } from '../../lib/errors.js';
 import { dashExport } from './export.js';
 import { exportQuery, monthQuery, periodQuery, unitParams, userParams } from './schemas.js';
 import { childrenTable, overview, unitVillages, zimmedarDays, zimmedaranTable } from './service.js';
 
-/** Supervisor dashboards. Zimmedaran get 403 on every /dash route. */
+/**
+ * Read-only dashboards for supervisors and Tehsil Zimmedaran (each in their own scope, by unit
+ * path). Ushar Zimmedaran get 403 on every /dash route.
+ */
 export function dashRouter(): Router {
   const router = Router();
-  router.use(requireAuth, requireRole(...SUPERVISOR_ROLES));
+  router.use(requireAuth, requireRole(...DASHBOARD_ROLES));
 
   router.get('/units/:code/overview', async (req, res) => {
     const { code } = parse(unitParams, req.params);

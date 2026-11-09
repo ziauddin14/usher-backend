@@ -84,7 +84,16 @@ const SINDH_DIVISIONS: [code: string, name: string, nameUr: string, districts: D
   ],
 ];
 
-/** Pakistan → Suba → Division → District. Division and district can share a name; district codes then end in `_DIST`. */
+/**
+ * Demo Tehsil (Phase 2, invented): Khairpur's Ushar Zimmedaran sit under one Tehsil / Town, with
+ * a Tehsil Zimmedar login. Every other district keeps its zimmedaran on the district itself.
+ */
+export const DEMO_TEHSIL = { code: 'KHAIRPUR_TOWN', district: 'KHAIRPUR' } as const;
+
+/**
+ * Pakistan → Suba → Division → District (→ the one demo Tehsil). Division and district can share a
+ * name; district codes then end in `_DIST`.
+ */
 export function seedUnits(): SeedUnit[] {
   const units: SeedUnit[] = [
     { code: 'PK', name: 'Pakistan', nameUr: 'پاکستان', level: 'pakistan', parentCode: null },
@@ -117,6 +126,13 @@ export function seedUnits(): SeedUnit[] {
       });
     }
   }
+  units.push({
+    code: DEMO_TEHSIL.code,
+    name: 'Khairpur Town',
+    nameUr: 'خیرپور ٹاؤن',
+    level: 'tehsil',
+    parentCode: DEMO_TEHSIL.district,
+  });
   return units;
 }
 
@@ -129,7 +145,7 @@ export interface SeedUser {
   unitCode: string;
 }
 
-/** The five demo logins (scope §6). */
+/** The five demo logins (scope §6) and the demo Tehsil Zimmedar (Phase 2). */
 export const DEMO_USERS: SeedUser[] = [
   {
     ajeerCode: '9010001',
@@ -166,6 +182,13 @@ export const DEMO_USERS: SeedUser[] = [
     role: 'zimmedar',
     zimmedari: 'ushar',
     unitCode: 'GHOTKI',
+  },
+  {
+    ajeerCode: '9050001',
+    name: 'Muhammad Naeem',
+    nameUr: 'محمد نعیم',
+    role: 'tehsil',
+    unitCode: DEMO_TEHSIL.code,
   },
 ];
 
@@ -265,7 +288,7 @@ export function seedZimmedaran(districtCodes: string[]): SeedUser[] {
         nameUr: `${fu} ${lu}`,
         role: 'zimmedar',
         zimmedari,
-        unitCode,
+        unitCode: unitCode === DEMO_TEHSIL.district ? DEMO_TEHSIL.code : unitCode,
       });
     }
   }

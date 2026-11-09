@@ -69,9 +69,9 @@ describe('inspect an official file (no database)', () => {
     });
     expect(report).toMatchObject({
       rows: 5,
-      importable: 1,
+      importable: 2, // the Ushar and its Tehsil/Town Zimmedar
       sameCode: 1,
-      onHold: { tehsilRolePending: 1, noTehsilParent: 0 },
+      onHold: { noTehsilParent: 0 },
     });
     expect(report.heldSuffix).toEqual([
       { suffix: '/2', n: 1 },

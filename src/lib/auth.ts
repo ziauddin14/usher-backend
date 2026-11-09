@@ -139,8 +139,15 @@ export function requireRole(...roles: Role[]): RequestHandler {
   };
 }
 
-/** Supervisors: district and above. */
+/**
+ * Supervisors: District and above. They may change data in their scope (users, Gaon, reopen,
+ * official duty). A Tehsil Zimmedar is NOT one (CTO 9 Nov 2026: no password reset, no
+ * activate / deactivate, no Gaon management).
+ */
 export const SUPERVISOR_ROLES: Role[] = ['district', 'division', 'suba', 'pakistan'];
+
+/** Read-only dashboards: every supervisor plus the Tehsil Zimmedar (own Tehsil only, by scope). */
+export const DASHBOARD_ROLES: Role[] = ['tehsil', ...SUPERVISOR_ROLES];
 
 export function currentUser(req: Request): AuthUser {
   if (!req.user) throw new AppError(401, 'UNAUTHENTICATED', 'Login required');

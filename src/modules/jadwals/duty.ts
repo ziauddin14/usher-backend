@@ -10,27 +10,35 @@ import { connectDb } from '../../lib/db.js';
 import { AppError } from '../../lib/errors.js';
 import { scopeFilter } from '../../lib/scope.js';
 import { Jadwal, type DutyDecision } from '../../models/jadwal.js';
-import { ROLE_RANK, type Role, User } from '../../models/user.js';
+import { type Role, User } from '../../models/user.js';
 
 /**
- * Who decides official duty for a mashwara, by the owner's role:
- *   zimmedar ← District · district ← Division · division ← Suba (the level directly above, in scope).
- *   suba / pakistan owners: no approver is authorized in Demo v1 (supervisors do not file jadwals)
- *   → 403.
- * Never self, never same level, never any other higher level.
+ * Who decides official duty for a mashwara, by the owner's role — an explicit map, never the role
+ * rank (CTO 9 Nov 2026: a Tehsil sits between District and Ushar, but an Ushar Zimmedar's duty is
+ * still decided by the District, and so is a Tehsil Zimmedar's own):
+ *   zimmedar ← District · tehsil ← District · district ← Division · division ← Suba (in scope).
+ *   suba / pakistan owners: no approver is authorized (supervisors do not file jadwals) → 403.
+ * Never self, never any other level (a Tehsil never approves).
  */
+export const DUTY_APPROVER: Partial<Record<Role, Role>> = {
+  zimmedar: 'district',
+  tehsil: 'district',
+  district: 'division',
+  division: 'suba',
+};
 export function assertDutyApprover(caller: AuthUser, owner: { _id: unknown; role: Role }): void {
   if (String(owner._id) === caller.id) {
     throw new AppError(403, 'FORBIDDEN', 'Nobody approves their own mashwara');
   }
-  if (owner.role === 'suba' || owner.role === 'pakistan') {
+  const approver = DUTY_APPROVER[owner.role];
+  if (!approver) {
     throw new AppError(
       403,
       'FORBIDDEN',
       'No official-duty approver is authorized for this level in Demo v1',
     );
   }
-  if (ROLE_RANK[caller.role] !== ROLE_RANK[owner.role] + 1) {
+  if (caller.role !== approver) {
     throw new AppError(403, 'FORBIDDEN', 'Only the level directly above approves official duty');
   }
 }

@@ -55,16 +55,17 @@ export const ZIMMEDARI_MAP: Record<string, { role: Role; zimmedari?: Zimmedari }
       [
         ['Ushar', { role: 'zimmedar', zimmedari: 'ushar' }],
         ['Ushar Zimmedar', { role: 'zimmedar', zimmedari: 'ushar' }],
-        ['Tehsil-Town', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
-        ['Tehsil', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
-        ['Town', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
+        // CTO 9 Nov 2026: the Tehsil/Town Zimmedar is the Tehsil role (its own unit level).
+        ['Tehsil-Town', { role: 'tehsil' }],
+        ['Tehsil', { role: 'tehsil' }],
+        ['Town', { role: 'tehsil' }],
         ['Event', { role: 'zimmedar', zimmedari: 'event' }],
         ['District', { role: 'district' }],
         ['Division', { role: 'division' }],
         ['Suba', { role: 'suba' }],
         ['اسسٹینٹ عشر ذمہ دار', { role: 'zimmedar', zimmedari: 'ushar' }],
         ['عشر ذمہ دار', { role: 'zimmedar', zimmedari: 'ushar' }],
-        ['ٹاؤن /تحصیل ذمہ دار', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
+        ['ٹاؤن /تحصیل ذمہ دار', { role: 'tehsil' }],
         ['ایونٹ عشر ذمہ دار', { role: 'zimmedar', zimmedari: 'event' }],
         ['ڈسٹرکٹ ذمہ دار', { role: 'district' }],
         ['سرکاری ڈویژن ذمہ دار', { role: 'division' }],
@@ -107,9 +108,8 @@ export interface ValidRow {
 export interface HeldEmployee {
   row: number;
   ajeerCode: string;
-  /** TEHSIL_ROLE_PENDING: a Tehsil/Town Zimmedar, until the Tehsil role exists.
-   *  NO_TEHSIL_PARENT: an Ushar Zimmedar whose District + Town has no Tehsil/Town Zimmedar. */
-  reason: 'TEHSIL_ROLE_PENDING' | 'NO_TEHSIL_PARENT';
+  /** An Ushar Zimmedar whose District + Town has no importable Tehsil/Town Zimmedar. */
+  reason: 'NO_TEHSIL_PARENT';
   /** Verified HR units of the row: they still form the organisation (CTO 9 Nov 2026). */
   suba: string;
   division: string;
@@ -145,7 +145,7 @@ export interface ImportPlan {
   otherSuffix: SameCodeGroup['rows'];
   /** Rows whose designation (Zimmedari) maps to no role: rejected, listed for confirmation. */
   unknownDesignations: UnknownDesignation[];
-  /** Eligible rows not imported now: Tehsil role pending, or no Tehsil parent. */
+  /** Eligible rows not imported now: no verified Tehsil parent. */
   onHold: HeldEmployee[];
 }
 
@@ -177,7 +177,7 @@ export interface ImportResult {
   changes: { row: number; ajeerCode: string; field: string; from: string; to: string }[];
   /** Designations that map to no role (rows rejected) — the department confirms the mapping. */
   unknownDesignations: UnknownDesignation[];
-  /** Not imported now (CTO 9 Nov 2026): Tehsil role pending / no Tehsil parent. */
+  /** Not imported now (CTO 9 Nov 2026): no verified Tehsil parent. */
   onHold: HeldEmployee[];
   /** District units that exist only because a Division / Suba official's row names them. */
   officialDistrictUnits: { code: string; name: string; path: string }[];
@@ -262,7 +262,7 @@ export function validateRows(rows: RawRow[]): ImportPlan {
         zimmedari: clean(values.zimmedari) ?? '',
       });
       problems.push(
-        `Zimmedari "${values.zimmedari ?? ''}" is not a Demo v1 role (Ushar, Tehsil-Town, Event, District, Division, Suba)`,
+        `Zimmedari "${values.zimmedari ?? ''}" is not an approved role (Ushar, Tehsil-Town, Event, District, Division, Suba)`,
       );
     }
 
@@ -271,8 +271,15 @@ export function validateRows(rows: RawRow[]): ImportPlan {
     const district = clean(values.district);
     if (!suba) problems.push('Suba is missing');
     if (mapped && mapped.role !== 'suba' && !division) problems.push('Division is missing');
-    if (mapped && (mapped.role === 'zimmedar' || mapped.role === 'district') && !district) {
+    if (
+      mapped &&
+      (mapped.role === 'zimmedar' || mapped.role === 'tehsil' || mapped.role === 'district') &&
+      !district
+    ) {
       problems.push('District is missing');
+    }
+    if (mapped?.role === 'tehsil' && !clean(values.town)) {
+      problems.push('Town is missing (the Tehsil unit of a Tehsil/Town Zimmedar)');
     }
 
     let mobile: string | undefined;
@@ -305,7 +312,9 @@ export function validateRows(rows: RawRow[]): ImportPlan {
       ...(mapped.zimmedari ? { zimmedari: mapped.zimmedari } : {}),
       suba,
       ...(mapped.role !== 'suba' ? { division: division! } : {}),
-      ...(mapped.role === 'zimmedar' || mapped.role === 'district' ? { district: district! } : {}),
+      ...(mapped.role === 'zimmedar' || mapped.role === 'tehsil' || mapped.role === 'district'
+        ? { district: district! }
+        : {}),
       ...(mobile ? { mobile } : {}),
       ...(clean(values.town) ? { town: clean(values.town)! } : {}),
       // A Division / Suba official's own District value (both Division and District present).
@@ -314,17 +323,14 @@ export function validateRows(rows: RawRow[]): ImportPlan {
         : {}),
     });
   }
-  // Holds (CTO 9 Nov 2026), decided only from verified HR data — never inferred:
-  // - a Tehsil/Town Zimmedar is not imported until the Tehsil role exists;
-  // - an Ushar Zimmedar is imported only when the HR file has a Tehsil/Town Zimmedar for exactly
-  //   the same District + Town; otherwise held (no fallback, no fabricated Tehsil).
+  // Hold (CTO 9 Nov 2026), decided only from verified HR data — never inferred: an Ushar Zimmedar
+  // is imported only when the HR file has an importable Tehsil/Town Zimmedar for exactly the same
+  // District + Town (its Tehsil unit); otherwise held (no fallback, no fabricated Tehsil).
   // District as the unit resolver compares it (level words ignored); Town exactly as written
   // (only case, spaces and punctuation ignored).
   const placeKey = (d?: string, t?: string) => `${unitKey(d ?? '')}|${headerKey(t ?? '')}`;
   const tehsilPlaces = new Set(
-    valid
-      .filter((v) => v.zimmedari === 'tehsil_town' && v.town)
-      .map((v) => placeKey(v.district, v.town)),
+    valid.filter((v) => v.role === 'tehsil' && v.town).map((v) => placeKey(v.district, v.town)),
   );
   const onHold: HeldEmployee[] = [];
   const importable: ValidRow[] = [];
@@ -335,12 +341,7 @@ export function validateRows(rows: RawRow[]): ImportPlan {
       district: v.district ?? '',
       town: v.town ?? '',
     };
-    if (v.zimmedari === 'tehsil_town') {
-      onHold.push({ row: v.row, ajeerCode: v.ajeerCode, reason: 'TEHSIL_ROLE_PENDING', ...where });
-    } else if (
-      v.role === 'zimmedar' &&
-      (!v.town || !tehsilPlaces.has(placeKey(v.district, v.town)))
-    ) {
+    if (v.role === 'zimmedar' && (!v.town || !tehsilPlaces.has(placeKey(v.district, v.town)))) {
       onHold.push({ row: v.row, ajeerCode: v.ajeerCode, reason: 'NO_TEHSIL_PARENT', ...where });
     } else {
       importable.push(v);
@@ -376,8 +377,8 @@ export function validateRows(rows: RawRow[]): ImportPlan {
 /**
  * For the village import (CTO 7 Nov 2026): Ajeer Codes the HR file holds back — every base code
  * written with /2, /3 … (even when a /1 row of it exists: the village rows cannot tell them apart)
- * — codes the employee import rejects, and employees on hold (Tehsil role pending / no Tehsil
- * parent, CTO 9 Nov 2026). Villages naming them are never assigned.
+ * — codes the employee import rejects, and employees on hold (no verified Tehsil parent,
+ * CTO 9 Nov 2026). Villages naming them are never assigned.
  */
 export function hrCodesFromPlan(plan: ImportPlan): {
   held: Set<string>;
@@ -412,6 +413,14 @@ interface UnitRef {
   isNew: boolean;
 }
 
+/**
+ * Comparison key of a unit name at a level. Suba / Division / District ignore level words
+ * ("Multan Division" = "ملتان"); a Tehsil is matched exactly as HR writes the Town (only case,
+ * spaces and punctuation ignored), so "X ٹاؤن" and "X تحصیل" never merge (CTO 9 Nov 2026).
+ */
+const unitNameKey = (level: UnitLevel, name: string) =>
+  level === 'tehsil' ? `tehsil:${headerKey(name)}` : unitKey(name);
+
 /** Find units by (parent, name ignoring words like "Division"); plan new ones with unique codes. */
 class UnitResolver {
   private byParentAndKey = new Map<string, UnitRef>();
@@ -424,7 +433,7 @@ class UnitResolver {
       const ref: UnitRef = { ...u, parentCode: u.parentCode ?? null, isNew: false };
       // Match by the Roman and the Urdu name (the department export uses Urdu names).
       for (const n of [u.name, u.nameUr]) {
-        if (n) this.byParentAndKey.set(`${ref.parentCode ?? ''}|${unitKey(n)}`, ref);
+        if (n) this.byParentAndKey.set(`${ref.parentCode ?? ''}|${unitNameKey(u.level, n)}`, ref);
       }
       this.codes.add(u.code);
     }
@@ -444,10 +453,13 @@ class UnitResolver {
   resolve(name: string, level: UnitLevel, parent: UnitRef, urduChain: string[]): UnitRef {
     const roman = hasUrduScript(name) ? this.names?.romanFor(level, urduChain) : undefined;
     for (const n of [name, roman]) {
-      const found = n && this.byParentAndKey.get(`${parent.code}|${unitKey(n)}`);
+      const found = n && this.byParentAndKey.get(`${parent.code}|${unitNameKey(level, n)}`);
       if (found) return found;
     }
-    const bare = name.replace(LEVEL_WORDS, '').replace(/\s+/g, ' ').trim() || name;
+    const bare =
+      level === 'tehsil'
+        ? name.replace(/\s+/g, ' ').trim()
+        : name.replace(LEVEL_WORDS, '').replace(/\s+/g, ' ').trim() || name;
     return this.create(roman ?? bare, level, parent, undefined, roman ? bare : undefined);
   }
 
@@ -458,7 +470,7 @@ class UnitResolver {
   isConfirmed(name: string, level: UnitLevel, parent: UnitRef, urduChain: string[]): boolean {
     const roman = hasUrduScript(name) ? this.names?.romanFor(level, urduChain) : undefined;
     if (roman) return true;
-    return [name].some((n) => this.byParentAndKey.has(`${parent.code}|${unitKey(n)}`));
+    return this.byParentAndKey.has(`${parent.code}|${unitNameKey(level, name)}`);
   }
 
   private create(
@@ -474,7 +486,13 @@ class UnitResolver {
         .toUpperCase()
         .replace(/[^A-Z0-9]+/g, '_')
         .replace(/^_|_$/g, '');
-    const suffix = { pakistan: '', suba: '_SUBA', division: '_DIV', district: '_DIST' }[level];
+    const suffix = {
+      pakistan: '',
+      suba: '_SUBA',
+      division: '_DIV',
+      district: '_DIST',
+      tehsil: '_TEH',
+    }[level];
     let code: string;
     if (latin) {
       code = latin;
@@ -482,7 +500,13 @@ class UnitResolver {
       for (let n = 2; this.codes.has(code); n += 1) code = `${latin}${suffix}_${n}`;
     } else {
       // Urdu-only name: a neutral code such as DIST_3 (the name is kept in name / nameUr).
-      const prefix = { pakistan: 'PK', suba: 'SUBA', division: 'DIV', district: 'DIST' }[level];
+      const prefix = {
+        pakistan: 'PK',
+        suba: 'SUBA',
+        division: 'DIV',
+        district: 'DIST',
+        tehsil: 'TEH',
+      }[level];
       let n = 1;
       while (this.codes.has(`${prefix}_${n}`)) n += 1;
       code = `${prefix}_${n}`;
@@ -498,23 +522,37 @@ class UnitResolver {
     };
     this.codes.add(code);
     for (const n of [name, urduName]) {
-      if (n) this.byParentAndKey.set(`${ref.parentCode ?? ''}|${unitKey(n)}`, ref);
+      if (n) this.byParentAndKey.set(`${ref.parentCode ?? ''}|${unitNameKey(level, n)}`, ref);
     }
     this.created.push(ref);
     return ref;
   }
 
-  /** The unit a user belongs to: their district, or their own unit for supervisors. */
+  /**
+   * The unit a user belongs to: a supervisor's own unit; a Tehsil Zimmedar's Tehsil; an Ushar
+   * Zimmedar's Tehsil (importable ones always have a verified Tehsil parent — validateRows holds the
+   * others). Without a Town the District is returned (used for held rows and official records,
+   * which never create a Tehsil).
+   */
   unitFor(row: ValidRow): UnitRef {
     const suba = this.resolve(row.suba, 'suba', this.root(), [row.suba]);
     if (row.role === 'suba') return suba;
     const division = this.resolve(row.division!, 'division', suba, [row.suba, row.division!]);
     if (row.role === 'division') return division;
-    return this.resolve(row.district!, 'district', division, [
+    const district = this.resolve(row.district!, 'district', division, [
       row.suba,
       row.division!,
       row.district!,
     ]);
+    if ((row.role === 'tehsil' || row.role === 'zimmedar') && row.town) {
+      return this.resolve(row.town, 'tehsil', district, [
+        row.suba,
+        row.division!,
+        row.district!,
+        row.town,
+      ]);
+    }
+    return district;
   }
 }
 
@@ -569,7 +607,13 @@ export async function importEmployees(
   const assignments = toImport.map((row) => ({ row, unit: units.unitFor(row) }));
   // Units of held rows too: verified HR organisation, created without any account (CTO 9 Nov 2026).
   for (const h of plan.onHold) {
-    units.unitFor({ ...h, ajeerCodeFull: h.ajeerCode, name: '', role: 'zimmedar' });
+    units.unitFor({
+      ...h,
+      ajeerCodeFull: h.ajeerCode,
+      name: '',
+      role: 'zimmedar',
+      town: undefined, // up to the District only: a Town without a verified Tehsil is no unit
+    });
   }
   // District units written on authorized Division / Suba officials' verified rows (CTO 9 Nov 2026):
   // the District unit exists even when no District-level employee does; nobody is made its
@@ -591,6 +635,7 @@ export async function importEmployees(
       role: 'zimmedar',
       division: row.officialDistrict.division,
       district: row.officialDistrict.district,
+      town: undefined, // District only — an official record never creates a Tehsil
     });
   }
   const officialDistrictUnits = units.created
@@ -739,7 +784,6 @@ export async function importEmployees(
       newUnits: result.newUnits.length,
       rejected: result.errors.length,
       changes: result.changes.length,
-      tehsilRolePending: result.onHold.filter((h) => h.reason === 'TEHSIL_ROLE_PENDING').length,
       noTehsilParent: result.onHold.filter((h) => h.reason === 'NO_TEHSIL_PARENT').length,
       mobileConflicts: result.mobileConflicts.length,
     },
@@ -821,7 +865,6 @@ export async function writeEmployeeReport(result: ImportResult, file: string): P
         .filter((h) => h.reason === reason)
         .map((h) => [h.row, h.ajeerCode, h.district, h.town]),
     );
-  heldSheet('Tehsil role pending', 'TEHSIL_ROLE_PENDING');
   sheet(
     'District - tasdeeq baqi',
     ['Row', 'Suba', 'Division', 'District (official record)'],

@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { assertDemoDb } from '../lib/databases.js';
 import { connectDb } from '../lib/db.js';
 import { env } from '../lib/env.js';
+import { districtPathOf } from '../lib/scope.js';
 import { clearSettingsCache, ensureSettings } from '../lib/settings.js';
 import { villageNameKey } from '../lib/text.js';
 import { AuditLog } from '../models/audit-log.js';
@@ -42,10 +43,12 @@ async function assignSeedVillages(): Promise<void> {
     .lean();
   const byDistrict = new Map<string, typeof zimmedaran>();
   for (const z of zimmedaran) {
-    const list = byDistrict.get(z.unitPath) ?? [];
+    // Villages belong to the District, also for a zimmedar under a Tehsil.
+    const district = districtPathOf(z.unitPath) ?? z.unitPath;
+    const list = byDistrict.get(district) ?? [];
     if (z.ajeerCode === '9090412') list.unshift(z);
     else list.push(z);
-    byDistrict.set(z.unitPath, list);
+    byDistrict.set(district, list);
   }
   const ops: {
     updateOne: {

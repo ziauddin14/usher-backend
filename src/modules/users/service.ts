@@ -1,6 +1,6 @@
 import { Types } from 'mongoose';
 import { audit } from '../../lib/audit.js';
-import type { AuthUser } from '../../lib/auth.js';
+import { type AuthUser, SUPERVISOR_ROLES } from '../../lib/auth.js';
 import { connectDb } from '../../lib/db.js';
 import { AppError } from '../../lib/errors.js';
 import { maskMobile } from '../../lib/mobile.js';
@@ -9,6 +9,13 @@ import { PasswordResetRequest } from '../../models/password-reset-request.js';
 import { Unit } from '../../models/unit.js';
 import { ROLE_RANK, ROLES, type Role, User } from '../../models/user.js';
 import { resetToInitialPassword } from '../auth/service.js';
+
+/** Password reset and activate / deactivate: supervisors only — never a Tehsil (CTO 9 Nov 2026). */
+function assertManager(caller: AuthUser): void {
+  if (!SUPERVISOR_ROLES.includes(caller.role)) {
+    throw new AppError(403, 'FORBIDDEN', 'Not allowed for this role');
+  }
+}
 
 function lowerRoles(caller: AuthUser): Role[] {
   return ROLES.filter((r) => ROLE_RANK[r] < ROLE_RANK[caller.role]);
@@ -65,6 +72,7 @@ export async function listUsers(caller: AuthUser, opts: { unit?: string; q?: str
 
 /** Open "forgot password" requests of users below the caller, in scope (oldest first). */
 export async function listResetRequests(caller: AuthUser) {
+  assertManager(caller);
   await connectDb();
   const requests = await PasswordResetRequest.find({
     ...scopeFilter(caller),
@@ -91,6 +99,7 @@ export async function listResetRequests(caller: AuthUser) {
  * change on next login. Closes any open request. Audit PASSWORD_RESET.
  */
 export async function resetPassword(caller: AuthUser, userId: string): Promise<void> {
+  assertManager(caller);
   await connectDb();
   const target = Types.ObjectId.isValid(userId)
     ? await User.findById(userId).select('ajeerCode role unitPath').lean()
@@ -108,6 +117,7 @@ export async function resetPassword(caller: AuthUser, userId: string): Promise<v
  * USER_STATUS.
  */
 export async function setUserStatus(caller: AuthUser, userId: string, isActive: boolean) {
+  assertManager(caller);
   await connectDb();
   const target = Types.ObjectId.isValid(userId)
     ? await User.findById(userId).select('ajeerCode role unitPath isActive').lean()

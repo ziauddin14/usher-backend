@@ -25,7 +25,8 @@ let file: string;
 
 /** One invented account per role; unit = the unit its dashboards open. */
 const ACCOUNTS: { code: string; role: Role; unit: string }[] = [
-  { code: '860001', role: 'zimmedar', unit: 'GHOTKI' },
+  { code: '860001', role: 'zimmedar', unit: 'GHOTKI_TOWN' },
+  { code: '860090', role: 'tehsil', unit: 'GHOTKI_TOWN' },
   { code: '860002', role: 'district', unit: 'GHOTKI' },
   { code: '860003', role: 'division', unit: 'SUKKUR' },
   { code: '860004', role: 'suba', unit: 'INT_SINDH' },
@@ -56,7 +57,7 @@ const ROWS = [
   ['860002/1', 'Invented District', 'District', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
   ['860003/1', 'Invented Division', 'Division', 'Interior Sindh', 'Sukkur', '', ''],
   ['860004/1', 'Invented Suba', 'Suba', 'Interior Sindh', '', '', ''],
-  // The verified Tehsil parent of the zimmedar's Town (held itself until the Tehsil role exists).
+  // The Tehsil/Town Zimmedar of the zimmedar's Town (Phase 2: an account in its Tehsil unit).
   [
     '860090/1',
     'Invented Tehsil',
@@ -115,7 +116,7 @@ describe('initial password demo1234 and the forced change, for every role', () =
     file = join(dir, 'hr.xlsx');
     await wb.xlsx.writeFile(file);
     const result = await importEmployees(await readEmployeeSheet(file), { dryRun: false });
-    expect(result).toMatchObject({ created: 4, updated: 0, errors: [] });
+    expect(result).toMatchObject({ created: 5, updated: 0, errors: [] });
     // Pakistan Admin accounts are never imported — only centrally provisioned.
     const admin = await provisionPakistanAdmin({
       ajeerCode: '860005',
@@ -231,7 +232,7 @@ describe('initial password demo1234 and the forced change, for every role', () =
     );
 
     const result = await importEmployees(await readEmployeeSheet(again), { dryRun: false });
-    expect(result).toMatchObject({ created: 0, updated: 5 });
+    expect(result).toMatchObject({ created: 0, updated: 6 });
     for (const a of ACCOUNTS) {
       const u = await User.findOne({ ajeerCode: a.code }).select('+passwordHash').lean();
       expect(u!.passwordHash, a.code).toBe(before.get(a.code)!.passwordHash);
