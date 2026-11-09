@@ -46,10 +46,11 @@ describe('village import', () => {
       [existing.name, 'Ghotki', 'Ghotki District', otherCode], // existing seeded village
       ['گوٹھ نام سے', 'Ghotki', 'Ghotki', 'Muhammad Arif'], // a name, not a code → never matched
       ['گوٹھ بے نام', 'Ghotki', 'Ghotki', '55555'], // unknown code → unassigned
-      ['گوٹھ ضلعی', 'Ghotki', '', '9040001'], // a district user → district pool
+      ['گوٹھ ضلعی', 'Ghotki', 'Ghotki', '9040001'], // a district user → district pool
       ['گوٹھ کہیں نہیں', 'X', 'Atlantis', ''], // district not found → not imported
       ['', 'X', 'Ghotki', '9090412'], // no village name
       ['گوٹھ رومن', 'X', 'District Naahro Feroze', ''], // Roman spelling via district-names.csv
+      ['گوٹھ بغیر ضلع', 'X', '', '9090412'], // no District: never the zimmedar's own (CTO 9 Nov)
     ]) {
       ws.addRow(r);
     }
@@ -64,7 +65,7 @@ describe('village import', () => {
   it('never reads the "Location" sheet', async () => {
     const rows = await readVillageSheet(file);
     expect(rows.some((r) => r.values.village === 'گوٹھ خفیہ')).toBe(false);
-    expect(rows).toHaveLength(10);
+    expect(rows).toHaveLength(11);
   });
 
   it('--dry-run reports everything and writes nothing', async () => {
@@ -72,14 +73,17 @@ describe('village import', () => {
     const result = await importVillages(await readVillageSheet(file), { dryRun: true });
     expect(result).toMatchObject({
       dryRun: true,
-      rows: 10,
+      rows: 11,
       villages: 6,
       duplicateRows: 2,
       created: 5,
       updated: 1,
       assigned: 2, // only by exact Ajeer Code (CTO 7 Nov 2026)
     });
-    expect(result.unmatchedVillages.map((u) => u.row)).toEqual([9]);
+    expect(result.unmatchedVillages.map((u) => [u.row, u.problem])).toEqual([
+      [9, `District "Atlantis" not recognised (no fallback to the employee's district)`],
+      [12, 'District is missing'],
+    ]);
     expect(result.noName.map((u) => u.row)).toEqual([10]);
     expect(result.districtPool.map((u) => u.problem)).toEqual([
       'Ajeer code 9040001 is a district user → district pool',
@@ -126,6 +130,8 @@ describe('village import', () => {
       districtCode: 'NAUSHAHRO_FEROZE',
     });
     expect(await Village.exists({ nameKey: 'کہیں نہیں' })).toBeNull();
+    // No District in the file: not imported, even though the zimmedar is known (no fallback).
+    expect(await Village.exists({ nameKey: 'بغیر ضلع' })).toBeNull();
   });
 
   it('is idempotent', async () => {
@@ -145,13 +151,14 @@ describe('village import', () => {
       'District farq',
       'Code 2, 3 - rukay hue',
       'Employee import nahi hua',
+      'Employee hold',
       'District pool',
       'Zimmedar nahi mila',
       'Aik gaon, kai zimmedar',
       'Assignment barqarar',
       'Purane naam se mila',
     ]);
-    expect(wb.getWorksheet('Gaon nahi mile')!.rowCount).toBe(2);
+    expect(wb.getWorksheet('Gaon nahi mile')!.rowCount).toBe(3);
     expect(wb.getWorksheet('Bina naam')!.rowCount).toBe(2);
   });
 

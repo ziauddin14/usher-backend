@@ -20,7 +20,17 @@ describe('inspect an official file (no database)', () => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('HR');
     ws.addRow(['Ushar staff list']);
-    ws.addRow(['اجیر کوڈ', 'نام', 'ذمہ داری', 'صوبہ', 'ڈویژن', 'ضلع', 'موبائل', 'Joining date']);
+    ws.addRow([
+      'اجیر کوڈ',
+      'نام',
+      'ذمہ داری',
+      'صوبہ',
+      'ڈویژن',
+      'ضلع',
+      'موبائل',
+      'ٹاؤن',
+      'Joining date',
+    ]);
     ws.addRow([
       '850001/1',
       'Invented A',
@@ -29,10 +39,21 @@ describe('inspect an official file (no database)', () => {
       'Sukkur',
       'Ghotki',
       '03001112233',
+      'گھوٹکی ٹاؤن',
     ]);
     ws.addRow(['850001/2', 'Invented B', 'عشر ذمہ دار', 'Sindh', 'Sukkur', 'Ghotki', '']);
     ws.addRow(['850002/3', 'Invented C', 'Manager', 'Sindh', 'Sukkur', 'Ghotki', '']);
     ws.addRow(['850003', 'Invented D', 'Manager', 'Sindh', 'Sukkur', 'Rohri', '']);
+    ws.addRow([
+      '850004',
+      'Invented T',
+      'ٹاؤن /تحصیل ذمہ دار',
+      'Sindh',
+      'Sukkur',
+      'Ghotki',
+      '',
+      'گھوٹکی ٹاؤن',
+    ]);
     const file = join(dir, 'hr.xlsx');
     await wb.xlsx.writeFile(file);
 
@@ -42,11 +63,16 @@ describe('inspect an official file (no database)', () => {
     expect(report.sheets[0]).toMatchObject({
       name: 'HR',
       headerRow: 2,
-      dataRows: 4,
-      mapped: { ajeerCode: 'اجیر کوڈ', zimmedari: 'ذمہ داری', mobile: 'موبائل' },
+      dataRows: 5,
+      mapped: { ajeerCode: 'اجیر کوڈ', zimmedari: 'ذمہ داری', mobile: 'موبائل', town: 'ٹاؤن' },
       unmapped: ['Joining date'],
     });
-    expect(report).toMatchObject({ rows: 4, importable: 1, sameCode: 1 });
+    expect(report).toMatchObject({
+      rows: 5,
+      importable: 1,
+      sameCode: 1,
+      onHold: { tehsilRolePending: 1, noTehsilParent: 0 },
+    });
     expect(report.heldSuffix).toEqual([
       { suffix: '/2', n: 1 },
       { suffix: '/3', n: 1 },

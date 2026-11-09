@@ -32,3 +32,27 @@ describe('district names mapping', () => {
     expect(names.forVillageFileName('Lesbela District')).toBeUndefined(); // no district in the list
   });
 });
+
+describe('Metropolitan Districts stay separate (CTO 9 Nov 2026)', () => {
+  const names = DistrictNames.load();
+
+  it('Sargodha Metropolitan is its own District, verified in both source files', () => {
+    expect(names.forVillageFileName('Sargodha Metropolitan')).toEqual({
+      subaUr: 'پنجاب',
+      divisionUr: 'سرگودھا',
+      districtUr: 'سرگودھا میٹرو پولیٹین',
+    });
+    expect(names.forVillageFileName('Sargodha District')?.districtUr).toBe('سرگودھا');
+    expect(names.romanFor('district', ['پنجاب', 'سرگودھا', 'سرگودھا میٹرو پولیٹین'])).toBe(
+      'Sargodha Metropolitan',
+    );
+  });
+
+  it('Faisalabad and Faisalabad Metropolitan are different Districts; the combined spelling maps to none', () => {
+    expect(names.forVillageFileName('Faisalabad District')?.districtUr).toBe('فیصل آباد');
+    expect(names.romanFor('district', ['پنجاب', 'فیصل آباد', 'فیصل آباد میٹرو پولیٹین'])).toBe(
+      'Faisalabad Metropolitan',
+    );
+    expect(names.forVillageFileName('Faisalabad District/Faisalabad Metropolitan')).toBeUndefined();
+  });
+});

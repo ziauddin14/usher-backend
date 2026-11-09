@@ -34,6 +34,8 @@ const COLUMNS = {
   division: ['Division', 'سرکاری ڈویژن', 'ڈویژن'],
   district: ['District', 'Zila', 'ڈسٹرکٹ', 'ضلع'],
   mobile: ['Mobile', 'Mobile No', 'Mobile Number', 'Phone', 'موبائل', 'موبائل نمبر'],
+  /** Town / Tehsil of the employee (HR "ٹاؤن"): decides the Tehsil parent of an Ushar Zimmedar. */
+  town: ['Town', 'Tehsil/Town', 'Town/Tehsil', 'ٹاؤن', 'تحصیل'],
 } as const;
 type Column = keyof typeof COLUMNS;
 export const COLUMN_KEYS = Object.fromEntries(
@@ -66,7 +68,8 @@ export const ZIMMEDARI_MAP: Record<string, { role: Role; zimmedari?: Zimmedari }
         ['ایونٹ عشر ذمہ دار', { role: 'zimmedar', zimmedari: 'event' }],
         ['ڈسٹرکٹ ذمہ دار', { role: 'district' }],
         ['سرکاری ڈویژن ذمہ دار', { role: 'division' }],
-        ['ڈویژن عشر ذمہ دار', { role: 'division' }],
+        // CTO 9 Nov 2026: "یہ عشر ذمہ دار ہے" — an Ushar Zimmedar, not a Division account.
+        ['ڈویژن عشر ذمہ دار', { role: 'zimmedar', zimmedari: 'ushar' }],
         ['صوبائی ذمہ دار', { role: 'suba' }],
       ] as const
     ).map(([text, mapped]) => [headerKey(text), mapped]),
@@ -91,6 +94,22 @@ export interface ValidRow {
   division?: string;
   district?: string;
   mobile?: string;
+  /** HR Town / Tehsil, as written. */
+  town?: string;
+}
+
+/** An eligible employee not imported now (CTO 9 Nov 2026) — listed on its own report sheet. */
+export interface HeldEmployee {
+  row: number;
+  ajeerCode: string;
+  /** TEHSIL_ROLE_PENDING: a Tehsil/Town Zimmedar, until the Tehsil role exists.
+   *  NO_TEHSIL_PARENT: an Ushar Zimmedar whose District + Town has no Tehsil/Town Zimmedar. */
+  reason: 'TEHSIL_ROLE_PENDING' | 'NO_TEHSIL_PARENT';
+  /** Verified HR units of the row: they still form the organisation (CTO 9 Nov 2026). */
+  suba: string;
+  division: string;
+  district: string;
+  town: string;
 }
 
 export interface RowProblem {
@@ -121,6 +140,8 @@ export interface ImportPlan {
   otherSuffix: SameCodeGroup['rows'];
   /** Rows whose designation (Zimmedari) maps to no role: rejected, listed for confirmation. */
   unknownDesignations: UnknownDesignation[];
+  /** Eligible rows not imported now: Tehsil role pending, or no Tehsil parent. */
+  onHold: HeldEmployee[];
 }
 
 /** A row whose designation is not mapped to a role — never given one automatically (CTO 7 Nov). */
@@ -151,6 +172,8 @@ export interface ImportResult {
   changes: { row: number; ajeerCode: string; field: string; from: string; to: string }[];
   /** Designations that map to no role (rows rejected) — the department confirms the mapping. */
   unknownDesignations: UnknownDesignation[];
+  /** Not imported now (CTO 9 Nov 2026): Tehsil role pending / no Tehsil parent. */
+  onHold: HeldEmployee[];
 }
 
 /** Who ran an import and from which file (kept on the accounts and in the audit log). */
@@ -274,8 +297,43 @@ export function validateRows(rows: RawRow[]): ImportPlan {
       ...(mapped.role !== 'suba' ? { division: division! } : {}),
       ...(mapped.role === 'zimmedar' || mapped.role === 'district' ? { district: district! } : {}),
       ...(mobile ? { mobile } : {}),
+      ...(clean(values.town) ? { town: clean(values.town)! } : {}),
     });
   }
+  // Holds (CTO 9 Nov 2026), decided only from verified HR data — never inferred:
+  // - a Tehsil/Town Zimmedar is not imported until the Tehsil role exists;
+  // - an Ushar Zimmedar is imported only when the HR file has a Tehsil/Town Zimmedar for exactly
+  //   the same District + Town; otherwise held (no fallback, no fabricated Tehsil).
+  // District as the unit resolver compares it (level words ignored); Town exactly as written
+  // (only case, spaces and punctuation ignored).
+  const placeKey = (d?: string, t?: string) => `${unitKey(d ?? '')}|${headerKey(t ?? '')}`;
+  const tehsilPlaces = new Set(
+    valid
+      .filter((v) => v.zimmedari === 'tehsil_town' && v.town)
+      .map((v) => placeKey(v.district, v.town)),
+  );
+  const onHold: HeldEmployee[] = [];
+  const importable: ValidRow[] = [];
+  for (const v of valid) {
+    const where = {
+      suba: v.suba,
+      division: v.division ?? '',
+      district: v.district ?? '',
+      town: v.town ?? '',
+    };
+    if (v.zimmedari === 'tehsil_town') {
+      onHold.push({ row: v.row, ajeerCode: v.ajeerCode, reason: 'TEHSIL_ROLE_PENDING', ...where });
+    } else if (
+      v.role === 'zimmedar' &&
+      (!v.town || !tehsilPlaces.has(placeKey(v.district, v.town)))
+    ) {
+      onHold.push({ row: v.row, ajeerCode: v.ajeerCode, reason: 'NO_TEHSIL_PARENT', ...where });
+    } else {
+      importable.push(v);
+    }
+  }
+  valid.length = 0;
+  valid.push(...importable);
   const sameCode = [...byCode]
     .filter(([, list]) => list.length > 1)
     .map(([ajeerCode, list]) => ({
@@ -287,23 +345,47 @@ export function validateRows(rows: RawRow[]): ImportPlan {
     .filter((r) => HELD_SUFFIX.test(r.ajeerCodeFull))
     .map((r) => ({ ...r, imported: valid.some((v) => v.row === r.row) }))
     .sort((a, b) => a.row - b.row);
-  return { valid, errors, warnings, sameCode, otherSuffix, unknownDesignations };
+  // Warnings of held rows belong to rows that are not imported now.
+  const heldRows = new Set(onHold.map((h) => h.row));
+  const importWarnings = warnings.filter((w) => !heldRows.has(w.row));
+  return {
+    valid,
+    errors,
+    warnings: importWarnings,
+    sameCode,
+    otherSuffix,
+    unknownDesignations,
+    onHold,
+  };
 }
 
 /**
  * For the village import (CTO 7 Nov 2026): Ajeer Codes the HR file holds back — every base code
  * written with /2, /3 … (even when a /1 row of it exists: the village rows cannot tell them apart)
- * — and codes the employee import rejects. Villages naming them are never assigned.
+ * — codes the employee import rejects, and employees on hold (Tehsil role pending / no Tehsil
+ * parent, CTO 9 Nov 2026). Villages naming them are never assigned.
  */
-export function hrCodesFromPlan(plan: ImportPlan): { held: Set<string>; rejected: Set<string> } {
+export function hrCodesFromPlan(plan: ImportPlan): {
+  held: Set<string>;
+  rejected: Set<string>;
+  onHold: Set<string>;
+  /** HR District of each employee on hold — the village import still applies "District farq". */
+  districtOf: Map<string, string>;
+} {
   const held = new Set(plan.otherSuffix.map((r) => r.ajeerCodeFull.split('/')[0]!));
   const imported = new Set(plan.valid.map((v) => v.ajeerCode));
+  const onHold = new Set(
+    plan.onHold.map((h) => h.ajeerCode).filter((c) => !imported.has(c) && !held.has(c)),
+  );
   const rejected = new Set(
     plan.errors
       .map((e) => e.ajeerCode)
-      .filter((c): c is string => !!c && !imported.has(c) && !held.has(c)),
+      .filter((c): c is string => !!c && !imported.has(c) && !held.has(c) && !onHold.has(c)),
   );
-  return { held, rejected };
+  const districtOf = new Map(
+    plan.onHold.filter((h) => onHold.has(h.ajeerCode)).map((h) => [h.ajeerCode, h.district]),
+  );
+  return { held, rejected, onHold, districtOf };
 }
 
 interface UnitRef {
@@ -461,6 +543,10 @@ export async function importEmployees(
   const units = new UnitResolver(names);
   await units.load();
   const assignments = toImport.map((row) => ({ row, unit: units.unitFor(row) }));
+  // Units of held rows too: verified HR organisation, created without any account (CTO 9 Nov 2026).
+  for (const h of plan.onHold) {
+    units.unitFor({ ...h, ajeerCodeFull: h.ajeerCode, name: '', role: 'zimmedar' });
+  }
   // A number already on record (from an earlier import, the KPI file or typed by the user) is
   // never overwritten; only users without one get the file's number.
   const mobileConflicts: ImportResult['mobileConflicts'] = [];
@@ -510,6 +596,7 @@ export async function importEmployees(
     sameCode: plan.sameCode,
     otherSuffix: plan.otherSuffix,
     unknownDesignations: plan.unknownDesignations,
+    onHold: plan.onHold,
     mobileConflicts,
     changes,
   };
@@ -600,6 +687,8 @@ export async function importEmployees(
       newUnits: result.newUnits.length,
       rejected: result.errors.length,
       changes: result.changes.length,
+      tehsilRolePending: result.onHold.filter((h) => h.reason === 'TEHSIL_ROLE_PENDING').length,
+      noTehsilParent: result.onHold.filter((h) => h.reason === 'NO_TEHSIL_PARENT').length,
       mobileConflicts: result.mobileConflicts.length,
     },
   });
@@ -672,6 +761,16 @@ export async function writeEmployeeReport(result: ImportResult, file: string): P
   for (const d of result.unknownDesignations) {
     byDesignation.set(d.zimmedari, (byDesignation.get(d.zimmedari) ?? 0) + 1);
   }
+  const heldSheet = (name: string, reason: HeldEmployee['reason']) =>
+    sheet(
+      name,
+      ['Row', 'Ajeer code', 'District', 'Town / Tehsil'],
+      result.onHold
+        .filter((h) => h.reason === reason)
+        .map((h) => [h.row, h.ajeerCode, h.district, h.town]),
+    );
+  heldSheet('Tehsil role pending', 'TEHSIL_ROLE_PENDING');
+  heldSheet('Tehsil parent nahi', 'NO_TEHSIL_PARENT');
   sheet(
     'Designation - tasdeeq',
     ['Designation (file)', 'Rows', 'Role (department to confirm)', 'Notes'],

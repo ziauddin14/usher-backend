@@ -30,6 +30,8 @@ export interface EmployeeFileReport {
   importable: number;
   rejected: { reason: string; n: number }[];
   noMobile: number;
+  /** Eligible rows not imported now (CTO 9 Nov 2026). */
+  onHold: { tehsilRolePending: number; noTehsilParent: number };
   /** /2, /3 … rows: held, never imported (CTO decides after seeing the file). */
   heldSuffix: { suffix: string; n: number }[];
   sameCode: number;
@@ -78,6 +80,10 @@ export async function inspectFile(
         (r) => r,
       ).map(({ value, n }) => ({ reason: value, n })),
       noMobile: plan.warnings.length,
+      onHold: {
+        tehsilRolePending: plan.onHold.filter((h) => h.reason === 'TEHSIL_ROLE_PENDING').length,
+        noTehsilParent: plan.onHold.filter((h) => h.reason === 'NO_TEHSIL_PARENT').length,
+      },
       heldSuffix: count(plan.otherSuffix, (r) => `/${r.ajeerCodeFull.split('/')[1] ?? ''}`).map(
         ({ value, n }) => ({ suffix: value, n }),
       ),

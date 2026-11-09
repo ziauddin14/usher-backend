@@ -105,6 +105,8 @@ export interface VillageImportResult {
   heldCode: UnmatchedRow[];
   /** Rows naming an employee the HR import rejected (e.g. designation not confirmed). */
   notImportedEmployee: UnmatchedRow[];
+  /** Rows naming an employee on hold (Tehsil role pending / no Tehsil parent): never assigned. */
+  employeeOnHold: UnmatchedRow[];
   /** Rows whose District differs from the named employee's own district: not imported. */
   districtMismatch: UnmatchedRow[];
 }
@@ -113,6 +115,10 @@ export interface VillageImportResult {
 export interface HrCodes {
   held: Set<string>;
   rejected: Set<string>;
+  /** Employees not imported now: Tehsil role pending / no Tehsil parent (CTO 9 Nov 2026). */
+  onHold?: Set<string>;
+  /** HR District (as written) of each employee on hold. */
+  districtOf?: Map<string, string>;
 }
 
 /** Who ran an import and from which file (kept on new villages and in the audit log). */
@@ -189,6 +195,7 @@ export async function importVillages(
   const unmatchedZimmedar: UnmatchedRow[] = [];
   const heldCode: UnmatchedRow[] = [];
   const notImportedEmployee: UnmatchedRow[] = [];
+  const employeeOnHold: UnmatchedRow[] = [];
   const districtMismatch: UnmatchedRow[] = [];
   const labels = new Map<string, string>(); // user id → "<ajeer code> <name>"
   let duplicateRows = 0;
@@ -221,10 +228,12 @@ export async function importVillages(
     // of employees the HR import rejected: their villages are never assigned (CTO 7 Nov 2026).
     const held = !!code && (HELD_SUFFIX.test(codeFull) || (hr?.held.has(code) ?? false));
     const rejected = !!code && !held && (hr?.rejected.has(code) ?? false);
-    const user = code && !held && !rejected ? byCode.get(code) : undefined;
+    const onHoldCode = !!code && !held && !rejected && (hr?.onHold?.has(code) ?? false);
+    const user = code && !held && !rejected && !onHoldCode ? byCode.get(code) : undefined;
 
-    // 1. District: the file's District column and, for a zimmedar / district user, their own
-    //    district. When both are known they must agree, else the row is an exception.
+    // 1. District: always the file's District column (CTO 9 Nov 2026: an unknown or unmatched
+    //    District name never falls back to the employee's HR district). For a zimmedar /
+    //    district user the file's District must also be their own district, else an exception.
     let fileDistrict: { code: string; path: string } | undefined;
     if (districtText) {
       const chain = names.forVillageFileName(districtText);
@@ -254,10 +263,29 @@ export async function importVillages(
       );
       continue;
     }
-    const district = userDistrict ?? fileDistrict;
+    // An employee on hold is not in the database, but their verified HR District still decides
+    // "District farq" — the approved exception rows stay excluded (CTO 7 / 9 Nov 2026).
+    const hrDistrict = onHoldCode ? hr?.districtOf?.get(code) : undefined;
+    if (fileDistrict && hrDistrict) {
+      const unit = districtByPath.get(fileDistrict.path);
+      const same = [unit?.name, unit?.nameUr].some((n) => n && unitKey(n) === unitKey(hrDistrict));
+      if (!same) {
+        districtMismatch.push(
+          report(
+            `District "${districtText}" is not the HR district of Ajeer code ${code} (${hrDistrict}) — not imported`,
+          ),
+        );
+        continue;
+      }
+    }
+    const district = fileDistrict;
     if (!district) {
       unmatchedVillages.push(
-        report(districtText ? `District "${districtText}" not found` : 'District is missing'),
+        report(
+          districtText
+            ? `District "${districtText}" not recognised (no fallback to the employee's district)`
+            : 'District is missing',
+        ),
       );
       continue;
     }
@@ -268,6 +296,12 @@ export async function importVillages(
     let poolReason: string | undefined;
     if (held) {
       heldCode.push(report(`Ajeer code ${codeFull || code} is held (/2, /3) — CTO decides`));
+    } else if (onHoldCode) {
+      employeeOnHold.push(
+        report(
+          `Ajeer code ${code} is on hold in the HR import (Tehsil role pending / no Tehsil parent)`,
+        ),
+      );
     } else if (rejected) {
       notImportedEmployee.push(
         report(`Ajeer code ${code} was not imported from the HR file (see its report)`),
@@ -389,6 +423,7 @@ export async function importVillages(
     formerNameMatches,
     heldCode,
     notImportedEmployee,
+    employeeOnHold,
     districtMismatch,
   };
   if (dryRun || plans.length === 0) return result;
@@ -511,6 +546,7 @@ export async function writeVillageReport(result: VillageImportResult, file: stri
   rowSheet('District farq', result.districtMismatch);
   rowSheet('Code 2, 3 - rukay hue', result.heldCode);
   rowSheet('Employee import nahi hua', result.notImportedEmployee);
+  rowSheet('Employee hold', result.employeeOnHold);
   rowSheet('District pool', result.districtPool);
   rowSheet('Zimmedar nahi mila', result.unmatchedZimmedar);
   sheet(

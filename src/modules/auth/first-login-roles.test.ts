@@ -32,12 +32,41 @@ const ACCOUNTS: { code: string; role: Role; unit: string }[] = [
   { code: '860005', role: 'pakistan', unit: 'PK' },
 ];
 
-const HEADER = ['Ajeer Code', 'Naam', 'Zimmedari', 'Suba', 'Division', 'District', 'Mobile'];
+const HEADER = [
+  'Ajeer Code',
+  'Naam',
+  'Zimmedari',
+  'Suba',
+  'Division',
+  'District',
+  'Mobile',
+  'Town',
+];
 const ROWS = [
-  ['860001/1', 'Invented Zimmedar', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
+  [
+    '860001/1',
+    'Invented Zimmedar',
+    'Ushar',
+    'Interior Sindh',
+    'Sukkur',
+    'Ghotki',
+    '',
+    'Ghotki Town',
+  ],
   ['860002/1', 'Invented District', 'District', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
   ['860003/1', 'Invented Division', 'Division', 'Interior Sindh', 'Sukkur', '', ''],
   ['860004/1', 'Invented Suba', 'Suba', 'Interior Sindh', '', '', ''],
+  // The verified Tehsil parent of the zimmedar's Town (held itself until the Tehsil role exists).
+  [
+    '860090/1',
+    'Invented Tehsil',
+    'Tehsil-Town',
+    'Interior Sindh',
+    'Sukkur',
+    'Ghotki',
+    '',
+    'Ghotki Town',
+  ],
 ];
 
 /** Protected endpoints for each role (all must answer 403 before the change). */
@@ -178,7 +207,16 @@ describe('initial password demo1234 and the forced change, for every role', () =
     const ws = wb.addWorksheet('HR');
     ws.addRow(HEADER);
     for (const r of ROWS) ws.addRow(r);
-    ws.addRow(['860006/1', 'Invented New', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', '']);
+    ws.addRow([
+      '860006/1',
+      'Invented New',
+      'Ushar',
+      'Interior Sindh',
+      'Sukkur',
+      'Ghotki',
+      '',
+      'Ghotki Town',
+    ]);
     const again = join(dir, 'hr-again.xlsx');
     await wb.xlsx.writeFile(again);
 
@@ -211,7 +249,26 @@ describe('initial password demo1234 and the forced change, for every role', () =
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('HR');
     ws.addRow(HEADER);
-    ws.addRow(['860007/1', 'Invented Dry', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', '']);
+    ws.addRow([
+      '860007/1',
+      'Invented Dry',
+      'Ushar',
+      'Interior Sindh',
+      'Sukkur',
+      'Ghotki',
+      '',
+      'Ghotki Town',
+    ]);
+    ws.addRow([
+      '860090/1',
+      'Invented Tehsil',
+      'Tehsil-Town',
+      'Interior Sindh',
+      'Sukkur',
+      'Ghotki',
+      '',
+      'Ghotki Town',
+    ]);
     const dry = join(dir, 'hr-dry.xlsx');
     await wb.xlsx.writeFile(dry);
     const result = await importEmployees(await readEmployeeSheet(dry), { dryRun: true });

@@ -21,7 +21,16 @@ describe('HR import → first login → forced password change', () => {
     await seedDemo({ reset: true });
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Employees');
-    ws.addRow(['Ajeer Code', 'Naam', 'Zimmedari', 'Suba', 'Division', 'District', 'Mobile']);
+    ws.addRow([
+      'Ajeer Code',
+      'Naam',
+      'Zimmedari',
+      'Suba',
+      'Division',
+      'District',
+      'Mobile',
+      'Town',
+    ]);
     ws.addRow([
       '870001',
       'Invented Employee',
@@ -30,6 +39,18 @@ describe('HR import → first login → forced password change', () => {
       'Sukkur',
       'Ghotki',
       '03001119900',
+      'Ghotki Town',
+    ]);
+    // The verified Tehsil parent of that Town (held itself until the Tehsil role exists).
+    ws.addRow([
+      '870090',
+      'Invented Tehsil',
+      'Tehsil-Town',
+      'Interior Sindh',
+      'Sukkur',
+      'Ghotki',
+      '',
+      'Ghotki Town',
     ]);
     const file = join(dir, 'hr.xlsx');
     await wb.xlsx.writeFile(file);
