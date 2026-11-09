@@ -152,3 +152,8 @@ Ajeer Codes written `/2`, `/3` … are **held**: never imported, listed on the r
   District still applies "District farq".
 - **HR units** (Suba / Division / District) are created from importable and held rows — once each,
   the same in dry run and real run; no unit is created from a name that is not in the HR file.
+- **District units from officials' records** (CTO 9 Nov 2026): a District written on an authorized
+  Division / Suba official's verified HR row becomes a District unit even without a District-level
+  employee — no account is created and its responsible person stays blank. Only confirmed names
+  (an existing unit or a `district-names.csv` entry); other names are listed on "District - tasdeeq
+  baqi" and no unit is created.
