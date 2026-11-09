@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import ExcelJS from 'exceljs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AuditLog } from '../../models/audit-log.js';
+import { headerKey } from '../../lib/xlsx.js';
 import { Unit } from '../../models/unit.js';
 import { NOT_CENTRALLY_MANAGED, User } from '../../models/user.js';
 import { seedDemo } from '../../seed/seed.js';
@@ -28,6 +29,31 @@ const HEADER = [
   'Division',
   'District',
   'Mobile',
+  'Town',
+];
+
+/** A Tehsil/Town Zimmedar row: held itself, but the verified parent of Ushar rows in that Town. */
+const GHOTKI_TEHSIL = [
+  880099,
+  'Test Tehsil',
+  '',
+  'Tehsil-Town',
+  'Interior Sindh',
+  'Sukkur',
+  'Ghotki',
+  '',
+  'Ghotki Town',
+];
+const ROHRI_TEHSIL = [
+  880098,
+  'Rohri Tehsil',
+  '',
+  'Tehsil-Town',
+  'Interior Sindh',
+  'Sukkur',
+  'Rohri',
+  '',
+  'Rohri Town',
 ];
 
 let dir: string;
@@ -70,13 +96,14 @@ describe('employee import', () => {
         'Sukkur Division',
         'Ghotki District',
         '0300-1112233',
+        'Ghotki Town',
       ],
-      // new tehsil-town zimmedar in a brand new suba / division / district
+      // new district zimmedar (Urdu name) in a brand new suba / division / district
       [
         880002,
         'ٹیسٹ ذمہ دار',
         'ٹیسٹ والد',
-        'Tehsil-Town',
+        'District',
         'Balochistan',
         'Quetta',
         'Quetta',
@@ -94,14 +121,37 @@ describe('employee import', () => {
         '03001112255',
       ],
       // existing non-demo zimmedar: data updated, password kept
-      [880007, 'Renamed Zimmedar', '', 'Event', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
+      [
+        880007,
+        'Renamed Zimmedar',
+        '',
+        'Event',
+        'Interior Sindh',
+        'Sukkur',
+        'Ghotki',
+        '',
+        'Ghotki Town',
+      ],
       // errors
       ['ABC', 'Bad Code', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
       [880004, 'Bad Role', '', 'Manager', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
       [880005, 'No District', '', 'Ushar', 'Interior Sindh', 'Sukkur', '', ''],
       [880006, 'Bad Mobile', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', '12345'],
       ['880001/2', 'Duplicate', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
-      [9090412, 'Real Person', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
+      [
+        9090412,
+        'Real Person',
+        '',
+        'Ushar',
+        'Interior Sindh',
+        'Sukkur',
+        'Ghotki',
+        '',
+        'Ghotki Town',
+      ],
+      // holds (CTO 9 Nov 2026): the Tehsil itself, and an Ushar whose Town has no Tehsil
+      GHOTKI_TEHSIL,
+      [880011, 'No Parent', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', '', 'Other Town'],
     ]);
   });
 
@@ -111,7 +161,7 @@ describe('employee import', () => {
 
   it('reads the header row and cell text', async () => {
     const rows = await readEmployeeSheet(file);
-    expect(rows).toHaveLength(10);
+    expect(rows).toHaveLength(12);
     expect(rows[0]).toMatchObject({
       row: 3,
       values: { ajeerCode: '880001/1', zimmedari: 'Ushar' },
@@ -137,6 +187,23 @@ describe('employee import', () => {
         ],
       },
     ]);
+  });
+
+  it('holds the Tehsil itself and an Ushar whose District + Town has no Tehsil (CTO 9 Nov 2026)', async () => {
+    const plan = validateRows(await readEmployeeSheet(file));
+    expect(plan.onHold.map((h) => [h.ajeerCode, h.reason])).toEqual([
+      ['880099', 'TEHSIL_ROLE_PENDING'],
+      ['880011', 'NO_TEHSIL_PARENT'],
+    ]);
+    expect(plan.onHold[1]).toMatchObject({ district: 'Ghotki', town: 'Other Town' });
+    // Same Town written with another case / spacing is the same place; another Town is not.
+    expect(plan.valid.map((v) => v.ajeerCode)).toEqual(
+      expect.arrayContaining(['880001', '880007', '9090412']),
+    );
+    expect(plan.valid.map((v) => v.ajeerCode)).not.toContain('880011');
+    expect(plan.valid.map((v) => v.ajeerCode)).not.toContain('880099');
+    const codes = hrCodesFromPlan(plan);
+    expect([...codes.onHold].sort()).toEqual(['880011', '880099']);
   });
 
   it('--dry-run writes nothing', async () => {
@@ -176,7 +243,7 @@ describe('employee import', () => {
     const urdu = await User.findOne({ ajeerCode: '880002' }).lean();
     expect(urdu).toMatchObject({
       nameUr: 'ٹیسٹ ذمہ دار',
-      zimmedari: 'tehsil_town',
+      role: 'district',
       mobile: '03001112244',
     });
     expect(urdu?.unitPath).toBe('PK/BALOCHISTAN/QUETTA/QUETTA_DIST');
@@ -192,6 +259,17 @@ describe('employee import', () => {
 
     const demo = await User.findOne({ ajeerCode: '9090412' }).lean();
     expect(demo?.name).toBe('Muhammad Arif');
+
+    // Held rows: no account, no unit of their own, listed separately.
+    expect(await User.countDocuments({ ajeerCode: { $in: ['880011', '880099'] } })).toBe(0);
+    expect(result.onHold.map((h) => h.reason)).toEqual(['TEHSIL_ROLE_PENDING', 'NO_TEHSIL_PARENT']);
+    const out = join(dir, 'held-report.xlsx');
+    await writeEmployeeReport(result, out);
+    const rb = new ExcelJS.Workbook();
+    await rb.xlsx.readFile(out);
+    expect(rb.getWorksheet('Tehsil role pending')!.rowCount).toBe(2);
+    expect(rb.getWorksheet('Tehsil parent nahi')!.rowCount).toBe(2);
+    expect(rb.getWorksheet('Tehsil parent nahi')!.getRow(2).getCell(4).text).toBe('Other Town');
   });
 
   it('is idempotent: a second run updates, creates nothing new', async () => {
@@ -249,8 +327,21 @@ describe('employee import', () => {
         'Sukkur',
         'Ghotki',
         '03009990000',
+        'Ghotki Town',
       ],
-      [880003, 'Test District Head', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Rohri', ''],
+      [
+        880003,
+        'Test District Head',
+        '',
+        'Ushar',
+        'Interior Sindh',
+        'Sukkur',
+        'Rohri',
+        '',
+        'Rohri Town',
+      ],
+      GHOTKI_TEHSIL,
+      ROHRI_TEHSIL,
     ]);
     const dry = await importEmployees(await readEmployeeSheet(again), { dryRun: true });
     expect(dry.changes).toEqual([
@@ -297,7 +388,18 @@ describe('employee import', () => {
   it('holds every /2 or /3 code: never imported, never blocks the /1 row, listed in its own sheet', async () => {
     const held = await writeSheet([
       ['880021/2', 'Held Two', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
-      ['880021/1', 'Kept One', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
+      [
+        '880021/1',
+        'Kept One',
+        '',
+        'Ushar',
+        'Interior Sindh',
+        'Sukkur',
+        'Ghotki',
+        '',
+        'Ghotki Town',
+      ],
+      GHOTKI_TEHSIL,
       ['880022/3', 'Held Three', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
     ]);
     const result = await importEmployees(await readEmployeeSheet(held), { dryRun: false });
@@ -456,7 +558,18 @@ describe('unknown designations and held codes (CTO 7 Nov 2026)', () => {
     ]);
     ws.addRow(['881003', 'Invented C', '', 'نگران مجلس', 'Interior Sindh', 'Sukkur', 'Ghotki', '']);
     ws.addRow(['881004/2', 'Invented D', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', '']);
-    ws.addRow(['881005', 'Invented E', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', '']);
+    ws.addRow([
+      '881005',
+      'Invented E',
+      '',
+      'Ushar',
+      'Interior Sindh',
+      'Sukkur',
+      'Ghotki',
+      '',
+      'Ghotki Town',
+    ]);
+    ws.addRow(GHOTKI_TEHSIL);
     const path = join(tmp, 'hr.xlsx');
     await wb.xlsx.writeFile(path);
 
@@ -495,5 +608,75 @@ describe('unknown designations and held codes (CTO 7 Nov 2026)', () => {
     expect(table.getRow(2).getCell(3).text).toBe(''); // never filled automatically
     expect(rb.getWorksheet('Designation rows')!.rowCount).toBe(4);
     expect(rb.getWorksheet('Code 2, 3 - rukay hue')!.rowCount).toBe(2);
+  });
+});
+
+describe('HR units, Metropolitan separation and the Division Ushar mapping (CTO 9 Nov 2026)', () => {
+  let tmp: string;
+  beforeAll(async () => {
+    tmp = await mkdtemp(join(tmpdir(), 'ushr-units-'));
+    await seedDemo({ reset: true });
+  });
+  afterAll(async () => {
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it('ڈویژن عشر ذمہ دار is an Ushar Zimmedar; سرکاری ڈویژن ذمہ دار stays Division', () => {
+    expect(ZIMMEDARI_MAP[headerKey('ڈویژن عشر ذمہ دار')]).toEqual({
+      role: 'zimmedar',
+      zimmedari: 'ushar',
+    });
+    expect(ZIMMEDARI_MAP[headerKey('سرکاری ڈویژن ذمہ دار')]).toEqual({ role: 'division' });
+    expect(ZIMMEDARI_MAP[headerKey('اسسٹینٹ عشر ذمہ دار')]).toEqual({
+      role: 'zimmedar',
+      zimmedari: 'ushar',
+    });
+  });
+
+  it('Metropolitan and ordinary Districts become separate units, once each; dry run lists the same units', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('HR');
+    ws.addRow(HEADER);
+    const row = (code: string, z: string, district: string, town = '') => [
+      code,
+      `Invented ${code}`,
+      '',
+      z,
+      'پنجاب',
+      'سرگودھا',
+      district,
+      '',
+      town,
+    ];
+    ws.addRow(row('882001', 'ڈسٹرکٹ ذمہ دار', 'سرگودھا'));
+    ws.addRow(row('882002', 'ڈسٹرکٹ ذمہ دار', 'سرگودھا میٹرو پولیٹین'));
+    ws.addRow(row('882003', 'ڈسٹرکٹ ذمہ دار', 'سرگودھا میٹرو پولیٹین')); // same unit again
+    ws.addRow(row('882004', 'ڈویژن عشر ذمہ دار', 'سرگودھا', 'سرگودھا تحصیل'));
+    ws.addRow(row('882005', 'ٹاؤن /تحصیل ذمہ دار', 'سرگودھا', 'سرگودھا تحصیل'));
+    const path = join(tmp, 'units.xlsx');
+    await wb.xlsx.writeFile(path);
+
+    const dry = await importEmployees(await readEmployeeSheet(path), { dryRun: true });
+    const real = await importEmployees(await readEmployeeSheet(path), { dryRun: false });
+    expect(dry.newUnits).toEqual(real.newUnits);
+    const districts = real.newUnits
+      .filter((u) => u.level === 'district')
+      .map((u) => u.name)
+      .sort();
+    expect(districts).toEqual(['Sargodha', 'Sargodha Metropolitan']);
+    expect(await Unit.countDocuments({ name: 'Sargodha Metropolitan', level: 'district' })).toBe(1);
+    const a = await User.findOne({ ajeerCode: '882001' }).lean();
+    const b = await User.findOne({ ajeerCode: '882002' }).lean();
+    expect(a!.unitPath).not.toBe(b!.unitPath);
+    // The Division Ushar row is a zimmedar under its Tehsil's District; the Tehsil is held.
+    expect(await User.findOne({ ajeerCode: '882004' }).lean()).toMatchObject({
+      role: 'zimmedar',
+      zimmedari: 'ushar',
+      unitPath: a!.unitPath,
+    });
+    expect(await User.exists({ ajeerCode: '882005' })).toBeNull();
+    // A second run creates no unit.
+    const again = await importEmployees(await readEmployeeSheet(path), { dryRun: false });
+    expect(again.newUnits).toEqual([]);
   });
 });

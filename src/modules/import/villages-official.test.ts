@@ -218,6 +218,41 @@ describe('official Gaon list: exact Ajeer Code, zimmedar-only assignment, except
     expect(header).toContain('Naam (reference)');
   });
 
+  it('an employee on hold (Tehsil pending / no Tehsil parent) gets no village; rows are listed', async () => {
+    // The HR District of the held employee still decides "District farq" (approved exceptions
+    // stay excluded): rows 3–5 are in Ghotki → on hold; row 13 says Larkana → District farq.
+    const onHold: HrCodes = {
+      ...hr,
+      onHold: new Set(['9090412']),
+      districtOf: new Map([['9090412', 'Ghotki']]),
+    };
+    const r = await importVillages(await readVillageSheet(file), { dryRun: true, hr: onHold });
+    expect(r.employeeOnHold.map((u) => u.row)).toEqual([3, 4, 5]);
+    expect(r.districtMismatch.map((u) => u.row)).toEqual([13]);
+    expect(r.districtMismatch[0]!.problem).toMatch(/HR district/);
+    expect(r.assigned).toBe(0);
+    expect(r.employeeOnHold[0]!.problem).toMatch(/on hold/);
+  });
+
+  it('a District name with no exact mapping is an exception — never the employee own district', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Sheet1');
+    ws.addRow(HEADER);
+    ws.addRow(row('Faisalabad District/Faisalabad Metropolitan', 'گوٹھ مشترکہ نام', '9090412'));
+    ws.addRow(row('Sargodha Metropolitan', 'گوٹھ میٹرو', '9090412'));
+    const path = join(dir, 'unknown-district.xlsx');
+    await wb.xlsx.writeFile(path);
+    const r = await importVillages(await readVillageSheet(path), { dryRun: false, hr });
+    // The seed has no Faisalabad unit: the combined name is unknown → "Gaon nahi mile".
+    expect(r.unmatchedVillages.map((u) => u.problem)).toEqual([
+      `District "Faisalabad District/Faisalabad Metropolitan" not recognised (no fallback to the employee's district)`,
+      `District "Sargodha Metropolitan" not recognised (no fallback to the employee's district)`,
+    ]);
+    expect(r.assigned).toBe(0);
+    expect(await Village.exists({ nameKey: 'مشترکہ نام' })).toBeNull();
+    expect(await Village.exists({ nameKey: 'میٹرو' })).toBeNull();
+  });
+
   it('without the HR codes a held base code would match — the CLI therefore requires --hr', async () => {
     const without = await importVillages(await readVillageSheet(file), { dryRun: true });
     expect(without.heldCode.map((u) => u.row)).toEqual([9]); // only the literal "/3"

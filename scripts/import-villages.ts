@@ -67,6 +67,7 @@ export function villageSummary(
     `  zimmedar not matched       : ${result.unmatchedZimmedar.length}`,
     `  held /2, /3 code (rows)    : ${result.heldCode.length}`,
     `  employee not imported (rows): ${result.notImportedEmployee.length}`,
+    `  employee on hold (rows)    : ${result.employeeOnHold.length}  — not assigned`,
     `  district differs (rows)    : ${result.districtMismatch.length}  — not imported`,
     `  district not found (rows)  : ${result.unmatchedVillages.length}  — not imported`,
     `  no name (rows)             : ${result.noName.length}  — not imported`,

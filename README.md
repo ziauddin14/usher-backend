@@ -136,3 +136,19 @@ Ajeer Codes written `/2`, `/3` … are **held**: never imported, listed on the r
 - A repeated HR import never sets, resets or re-hashes the password of an existing account.
 - Covered for every role (zimmedar, district, division, suba, pakistan) by
   `src/modules/auth/first-login-roles.test.ts`.
+
+## Import rules added 9 Nov 2026 (CTO)
+
+- **No District fallback:** the Gaon file's District must map exactly (unit name or
+  `data/district-names.csv`); an unknown, combined or empty District is an exception ("Gaon nahi
+  mile") — never the employee's HR district.
+- **Metropolitan Districts** are separate units (e.g. Sargodha vs Sargodha Metropolitan, Faisalabad
+  vs Faisalabad Metropolitan); "Metropolitan" is never dropped when names are compared.
+- `ڈویژن عشر ذمہ دار` → Ushar Zimmedar (`سرکاری ڈویژن ذمہ دار` stays Division).
+- **Holds** (HR `ٹاؤن` column): `ٹاؤن /تحصیل ذمہ دار` rows are not imported until the Tehsil role
+  exists ("Tehsil role pending"); an Ushar Zimmedar is imported only when the HR file has a
+  Tehsil/Town Zimmedar for exactly the same District + Town, else held ("Tehsil parent nahi").
+  Held employees get no account and no village ("Employee hold" in the Gaon report); their HR
+  District still applies "District farq".
+- **HR units** (Suba / Division / District) are created from importable and held rows — once each,
+  the same in dry run and real run; no unit is created from a name that is not in the HR file.
