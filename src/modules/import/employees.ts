@@ -194,8 +194,18 @@ export interface ImportSource {
   operator: string;
 }
 
-/** A code suffix other than /1: held for the CTO, never imported. */
-export const HELD_SUFFIX = /\/(?!1$)/;
+/**
+ * A code suffix other than /1 ("12345/2", "12345/3"). Since CTO 10 Nov 2026 such a row is imported
+ * like any other: the zimmedar logs in with the code before "/" (12345); the full code is kept in
+ * `ajeerCodeFull`. The rows are still listed on their own report sheet.
+ */
+export const OTHER_SUFFIX = /\/(?!1$)/;
+
+/** Same person: the same name, ignoring case and spacing. */
+const sameName = (a?: string, b?: string) =>
+  !!a &&
+  !!b &&
+  a.replace(/\s+/g, ' ').trim().toLowerCase() === b.replace(/\s+/g, ' ').trim().toLowerCase();
 
 const clean = (s: string | undefined) => s?.replace(/\s+/g, ' ').trim() || undefined;
 const hasUrduScript = (s: string) => /[؀-ۿ]/.test(s);
@@ -213,31 +223,23 @@ export function validateRows(rows: RawRow[]): ImportPlan {
   const unknownDesignations: UnknownDesignation[] = [];
   const seen = new Set<string>();
   const byCode = new Map<string, SameCodeGroup['rows']>();
+  const firstName = new Map<string, string>(); // login code → name on its first row
+  const taken = new Set<string>(); // login codes that already have a valid row (one account each)
 
   for (const { row, values } of rows) {
     const ajeerCode = normalizeAjeerCode(values.ajeerCode) ?? '';
     const ajeerCodeFull = fullAjeerCode(values.ajeerCode) ?? ajeerCode;
-    // A code written with a suffix other than /1 ("12345/2", "12345/3") is never imported and never
-    // blocks a /1 row of the same code: its meaning is for the CTO to decide after seeing the HR
-    // file (CTO 7 Nov 2026). It goes to its own report sheet only.
-    if (ajeerCode && HELD_SUFFIX.test(ajeerCodeFull)) {
-      const group = byCode.get(ajeerCode) ?? [];
-      group.push({
-        row,
-        ajeerCodeFull,
-        name: clean(values.name) ?? '',
-        zimmedari: clean(values.zimmedari) ?? '',
-        district: clean(values.district) ?? '',
-      });
-      byCode.set(ajeerCode, group);
-      continue;
-    }
+    const name = clean(values.name);
     const problems: string[] = [];
+    // Rows of one login code ("12345/1" and "12345/2", CTO 10 Nov 2026): the same person (same name)
+    // gets one account from the first valid row, the other rows are listed on "Aik code - 1 aur 2";
+    // another name on the same code is an error, so two people are never merged into one account.
+    let samePerson = false;
     if (!ajeerCode) problems.push('Ajeer Code must be 3–9 digits (optionally followed by /n)');
     else if (seen.has(ajeerCode)) {
-      problems.push(
-        `Ajeer Code appears twice in the file (login code ${ajeerCode}; first row kept)`,
-      );
+      if (!sameName(firstName.get(ajeerCode), name)) {
+        problems.push('Ajeer Code appears twice in the file with another name (first row kept)');
+      } else samePerson = taken.has(ajeerCode);
     }
     if (ajeerCode) {
       const group = byCode.get(ajeerCode) ?? [];
@@ -249,9 +251,10 @@ export function validateRows(rows: RawRow[]): ImportPlan {
         district: clean(values.district) ?? '',
       });
       byCode.set(ajeerCode, group);
+      if (!firstName.has(ajeerCode) && name) firstName.set(ajeerCode, name);
     }
+    if (samePerson) continue; // the same person's account comes from the first valid row
 
-    const name = clean(values.name);
     if (!name) problems.push('Naam is missing');
 
     const mapped = ZIMMEDARI_MAP[headerKey(values.zimmedari ?? '')];
@@ -294,6 +297,7 @@ export function validateRows(rows: RawRow[]): ImportPlan {
       continue;
     }
     seen.add(ajeerCode);
+    taken.add(ajeerCode);
     if (!mobile) {
       warnings.push({
         row,
@@ -357,7 +361,7 @@ export function validateRows(rows: RawRow[]): ImportPlan {
     }));
   const otherSuffix = [...byCode.values()]
     .flat()
-    .filter((r) => HELD_SUFFIX.test(r.ajeerCodeFull))
+    .filter((r) => OTHER_SUFFIX.test(r.ajeerCodeFull))
     .map((r) => ({ ...r, imported: valid.some((v) => v.row === r.row) }))
     .sort((a, b) => a.row - b.row);
   // Warnings of held rows belong to rows that are not imported now.
@@ -375,10 +379,9 @@ export function validateRows(rows: RawRow[]): ImportPlan {
 }
 
 /**
- * For the village import (CTO 7 Nov 2026): Ajeer Codes the HR file holds back — every base code
- * written with /2, /3 … (even when a /1 row of it exists: the village rows cannot tell them apart)
- * — codes the employee import rejects, and employees on hold (no verified Tehsil parent,
- * CTO 9 Nov 2026). Villages naming them are never assigned.
+ * For the village import: codes the employee import rejects and employees on hold (no verified
+ * Tehsil parent, CTO 9 Nov 2026); villages naming them are never assigned. `held` is empty since
+ * CTO 10 Nov 2026: /2 and /3 codes are imported with the code before "/" (kept for the API shape).
  */
 export function hrCodesFromPlan(plan: ImportPlan): {
   held: Set<string>;
@@ -387,7 +390,7 @@ export function hrCodesFromPlan(plan: ImportPlan): {
   /** HR District of each employee on hold — the village import still applies "District farq". */
   districtOf: Map<string, string>;
 } {
-  const held = new Set(plan.otherSuffix.map((r) => r.ajeerCodeFull.split('/')[0]!));
+  const held = new Set<string>();
   const imported = new Set(plan.valid.map((v) => v.ajeerCode));
   const onHold = new Set(
     plan.onHold.map((h) => h.ajeerCode).filter((c) => !imported.has(c) && !held.has(c)),
@@ -826,7 +829,7 @@ export async function writeEmployeeReport(result: ImportResult, file: string): P
     ),
   );
   sheet(
-    'Code 2, 3 - rukay hue',
+    'Code 2, 3 - login pehla code',
     ['Row', 'Poora code', 'Naam', 'Zimmedari', 'District', 'Import hua?'],
     result.otherSuffix.map((r) => [
       r.row,

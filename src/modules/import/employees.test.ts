@@ -170,14 +170,18 @@ describe('employee import', () => {
 
   it('reports every bad row with its row number', async () => {
     const plan = validateRows(await readEmployeeSheet(file));
-    // Row 11 ("880001/2") is held, not an error (CTO 7 Nov 2026).
-    expect(plan.errors.map((e) => e.row)).toEqual([7, 8, 9, 10]);
+    // Row 11 ("880001/2", another name than row 3) is an error since CTO 10 Nov 2026: a /2 code is
+    // the code before "/", and two people are never merged into one account.
+    expect(plan.errors.map((e) => e.row)).toEqual([7, 8, 9, 10, 11]);
     expect(plan.errors.find((e) => e.row === 8)?.message).toMatch(/Zimmedari/);
+    expect(plan.errors.find((e) => e.row === 11)?.message).toBe(
+      'Ajeer Code appears twice in the file with another name (first row kept)',
+    );
     expect(plan.warnings.map((w) => w.ajeerCode)).toEqual(['880007', '9090412', '880099']); // no mobile
     expect(plan.otherSuffix).toEqual([
       expect.objectContaining({ row: 11, ajeerCodeFull: '880001/2', imported: false }),
     ]);
-    // "880001/1" and "880001/2" share the login code 880001: listed for the CTO.
+    // "880001/1" and "880001/2" share the login code 880001: listed on "Aik code - 1 aur 2".
     expect(plan.sameCode).toEqual([
       {
         ajeerCode: '880001',
@@ -412,36 +416,53 @@ describe('employee import', () => {
     expect(JSON.stringify(log?.details)).not.toMatch(/Test|0300|880001/);
   });
 
-  it('holds every /2 or /3 code: never imported, never blocks the /1 row, listed in its own sheet', async () => {
-    const held = await writeSheet([
-      ['880021/2', 'Held Two', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
-      [
-        '880021/1',
-        'Kept One',
-        '',
-        'Ushar',
-        'Interior Sindh',
-        'Sukkur',
-        'Ghotki',
-        '',
-        'Ghotki Town',
-      ],
+  it('imports /2 and /3 codes with the code before "/"; one account for the same person (CTO 10 Nov 2026)', async () => {
+    const town = (code: string, name: string) => [
+      code,
+      name,
+      '',
+      'Ushar',
+      'Interior Sindh',
+      'Sukkur',
+      'Ghotki',
+      '',
+      'Ghotki Town',
+    ];
+    const file2 = await writeSheet([
+      town('880021/2', 'Same Person'), // the same person on two rows: one account (first row)
+      town('880021/1', 'same  person'),
       GHOTKI_TEHSIL,
-      ['880022/3', 'Held Three', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
+      town('880022/3', 'Third Code'), // a /3 code alone: login 880022
+      town('880023/1', 'Person A'), // two names on one code: never merged
+      town('880023/2', 'Person B'),
     ]);
-    const result = await importEmployees(await readEmployeeSheet(held), { dryRun: false });
+    const result = await importEmployees(await readEmployeeSheet(file2), { dryRun: false });
     expect(result.otherSuffix.map((r) => [r.ajeerCodeFull, r.imported])).toEqual([
-      ['880021/2', false],
-      ['880022/3', false],
+      ['880021/2', true],
+      ['880022/3', true],
+      ['880023/2', false],
     ]);
-    expect(result.errors).toEqual([]);
-    // 880021/1 only: the Ghotki Tehsil Zimmedar already exists from the import above (updated).
-    expect(result.created).toBe(1);
+    expect(result.errors.map((e) => [e.ajeerCode, e.message])).toEqual([
+      ['880023', 'Ajeer Code appears twice in the file with another name (first row kept)'],
+    ]);
+    expect(result.sameCode.map((g) => [g.ajeerCode, g.rows.map((r) => r.imported)])).toEqual([
+      ['880021', [true, false]],
+      ['880023', [true, false]],
+    ]);
+    // 880021, 880022, 880023 (Person A): the Ghotki Tehsil Zimmedar exists from the import above.
+    expect(result.created).toBe(3);
     expect(await User.findOne({ ajeerCode: '880021' }).lean()).toMatchObject({
-      name: 'Kept One',
-      ajeerCodeFull: '880021/1',
+      name: 'Same Person',
+      ajeerCodeFull: '880021/2',
+      mustChangePassword: true,
     });
-    expect(await User.exists({ ajeerCode: '880022' })).toBeNull();
+    expect(await User.findOne({ ajeerCode: '880022' }).lean()).toMatchObject({
+      ajeerCodeFull: '880022/3',
+    });
+    expect(await User.findOne({ ajeerCode: '880023' }).lean()).toMatchObject({ name: 'Person A' });
+    expect(await User.countDocuments({ ajeerCode: { $in: ['880021', '880022', '880023'] } })).toBe(
+      3,
+    );
   });
 });
 
@@ -614,7 +635,9 @@ describe('unknown designations and held codes (CTO 7 Nov 2026)', () => {
 
     const plan = validateRows(await readEmployeeSheet(path));
     const codes = hrCodesFromPlan(plan);
-    expect([...codes.held]).toEqual(['881004']);
+    // 881004/2 is no longer held (CTO 10 Nov 2026): login 881004, here on hold (no Town).
+    expect([...codes.held]).toEqual([]);
+    expect([...codes.onHold]).toEqual(['881004']);
     expect([...codes.rejected].sort()).toEqual(['881001', '881002', '881003']);
 
     const out = join(tmp, 'report.xlsx');
@@ -635,7 +658,7 @@ describe('unknown designations and held codes (CTO 7 Nov 2026)', () => {
     ]);
     expect(table.getRow(2).getCell(3).text).toBe(''); // never filled automatically
     expect(rb.getWorksheet('Designation rows')!.rowCount).toBe(4);
-    expect(rb.getWorksheet('Code 2, 3 - rukay hue')!.rowCount).toBe(2);
+    expect(rb.getWorksheet('Code 2, 3 - login pehla code')!.rowCount).toBe(2);
   });
 });
 

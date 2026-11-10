@@ -9,7 +9,6 @@ import { connectDb } from '../../lib/db.js';
 import { DistrictNames } from '../../lib/district-names.js';
 import { districtPathOf } from '../../lib/scope.js';
 import { villageNameKey } from '../../lib/text.js';
-import { HELD_SUFFIX } from './employees.js';
 import { unitKey } from '../../lib/unit-name.js';
 import { headerKey, loadWorkbook, readRows } from '../../lib/xlsx.js';
 import { Unit } from '../../models/unit.js';
@@ -225,9 +224,10 @@ export async function importVillages(
       continue;
     }
 
-    // Codes the HR file holds back (/2, /3 … or a base code that also has such a row) and codes
-    // of employees the HR import rejected: their villages are never assigned (CTO 7 Nov 2026).
-    const held = !!code && (HELD_SUFFIX.test(codeFull) || (hr?.held.has(code) ?? false));
+    // Codes of employees the HR import rejected or holds: their villages are never assigned. A /2 or
+    // /3 code matches the zimmedar by the code before "/" (CTO 10 Nov 2026), so `held` only applies
+    // to codes the HR side still lists as held (none since then).
+    const held = !!code && (hr?.held.has(code) ?? false);
     const rejected = !!code && !held && (hr?.rejected.has(code) ?? false);
     const onHoldCode = !!code && !held && !rejected && (hr?.onHold?.has(code) ?? false);
     const user = code && !held && !rejected && !onHoldCode ? byCode.get(code) : undefined;
