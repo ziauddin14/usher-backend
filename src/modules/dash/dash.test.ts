@@ -361,7 +361,9 @@ describe('dashboards (B1 / B2)', () => {
     const z = await xlsx(
       '/dash/export.xlsx?view=zimmedaran&code=GHOTKI&period=month&date=2026-10-15',
     );
-    expect(z.res.headers['content-disposition']).toContain('ushr-GHOTKI-month-2026-10-15.xlsx');
+    expect(z.res.headers['content-disposition']).toContain(
+      'UsherDesk-GHOTKI-month-2026-10-15.xlsx',
+    );
     expect(z.ws.rowCount).toBe(2 + 10 + 1);
     expect(z.ws.getRow(z.ws.rowCount).getCell(1).text).toBe('Kul');
     const c = await xlsx(

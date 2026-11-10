@@ -1,4 +1,4 @@
-# ushr-backend — USHR Amli Jadwal API
+# ushr-backend — UsherDesk API
 
 Express 5 + TypeScript + Mongoose (MongoDB). Serves `/api/v1/*` for the web app
 [`ushr-frontend`](../ushr-frontend). The browser never calls this API directly: the frontend's

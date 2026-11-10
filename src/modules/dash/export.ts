@@ -116,7 +116,7 @@ export async function dashExport(
         kpi('fare'),
       ],
     );
-    return { file, name: `ushr-${d.user.ajeerCode}-${d.month}.xlsx` };
+    return { file, name: `UsherDesk-${d.user.ajeerCode}-${d.month}.xlsx` };
   }
 
   if (!q.code) throw new AppError(400, 'VALIDATION_FAILED', 'code is required');
@@ -171,7 +171,7 @@ export async function dashExport(
         '',
       ],
     );
-    return { file, name: `ushr-${t.unit.code}-${t.period}-${t.date}.xlsx` };
+    return { file, name: `UsherDesk-${t.unit.code}-${t.period}-${t.date}.xlsx` };
   }
 
   const c = await childrenTable(caller, q.code, q.period, q.date);
@@ -218,5 +218,5 @@ export async function dashExport(
       ...tiers.map((_, i) => c.rows.reduce((s, r) => s + (r.onTrack[i]?.count ?? 0), 0)),
     ],
   );
-  return { file, name: `ushr-${c.unit.code}-${c.period}-${c.date}.xlsx` };
+  return { file, name: `UsherDesk-${c.unit.code}-${c.period}-${c.date}.xlsx` };
 }

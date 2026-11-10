@@ -195,7 +195,7 @@ describe('zimmedar khulasa, reward and export (A11, A12)', () => {
         r.on('end', () => cb(null, Buffer.concat(chunks)));
       })
       .expect(200);
-    expect(res.headers['content-disposition']).toContain('ushr-9090412-month-2026-10-15.xlsx');
+    expect(res.headers['content-disposition']).toContain('UsherDesk-9090412-month-2026-10-15.xlsx');
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(res.body as ArrayBuffer);
     const ws = wb.worksheets[0]!;

@@ -2,7 +2,7 @@
   "name": "ushr-demo-api",
   "version": "0.1.0",
   "private": true,
-  "description": "Ushar Amli Jadwal Demo v1 — API (Express 5 + MongoDB)",
+  "description": "UsherDesk — API (Express 5 + MongoDB)",
   "type": "module",
   "packageManager": "pnpm@10.34.9",
   "engines": {
