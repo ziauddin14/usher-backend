@@ -41,7 +41,7 @@ async function main(): Promise<void> {
     `  same code twice: ${result.sameCode.length} (e.g. /1 and /2 — sheet "Aik code - 1 aur 2")`,
   );
   console.warn(
-    `  held /2, /3   : ${result.otherSuffix.length} (never imported — sheet "Code 2, 3 - rukay hue", CTO decides)`,
+    `  codes /2, /3  : ${result.otherSuffix.length} (login with the code before "/" — sheet "Code 2, 3 - login pehla code")`,
   );
   console.warn(
     `  mobile kept   : ${result.mobileConflicts.length} (different number in the file — sheet "Mobile farq")`,

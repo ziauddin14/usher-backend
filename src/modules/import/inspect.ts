@@ -32,7 +32,7 @@ export interface EmployeeFileReport {
   noMobile: number;
   /** Eligible rows not imported now (CTO 9 Nov 2026). */
   onHold: { noTehsilParent: number };
-  /** /2, /3 … rows: held, never imported (CTO decides after seeing the file). */
+  /** /2, /3 … rows: imported with the code before "/" (CTO 10 Nov 2026), counted for the report. */
   heldSuffix: { suffix: string; n: number }[];
   sameCode: number;
   zimmedari: { value: string; n: number; mapsTo: string | null }[];

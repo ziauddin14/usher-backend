@@ -26,7 +26,7 @@ export function meRouter(): Router {
       rows: data.rows,
       totals: data.totals,
     });
-    const name = `ushr-${user.ajeerCode}-${query.period}-${data.date}.xlsx`;
+    const name = `UsherDesk-${user.ajeerCode}-${query.period}-${data.date}.xlsx`;
     res
       .set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
       .set('Content-Disposition', `attachment; filename="${name}"`)

@@ -1,4 +1,4 @@
-# ushr-backend — USHR Amli Jadwal API
+# ushr-backend — UsherDesk API
 
 Express 5 + TypeScript + Mongoose (MongoDB). Serves `/api/v1/*` for the web app
 [`ushr-frontend`](../ushr-frontend). The browser never calls this API directly: the frontend's
@@ -83,10 +83,10 @@ pnpm import:villages  private/<gaon-file>.xlsx --hr private/<hr-file>.xlsx --ope
   - `Employee Code` is the Ajeer Code, matched **exactly**; `Usher Zimmedar Name` is a reference in
     the report only, never matched. Only a user whose role is `zimmedar` gets an assignment; a
     supervisor's villages go to the district pool. The village contact columns are never read.
-  - `--hr` (required): codes the HR file holds back (`/2`, `/3` …, also when a `/1` row of the
-    same code exists) and employees it rejects never get villages — report sheets "Code 2, 3 - rukay
-    hue" and "Employee import nahi hua". A District that differs from the named employee's own
-    district is not imported ("District farq").
+  - `--hr` (required): employees the HR import rejects or holds (no Tehsil parent) never get
+    villages — report sheets "Employee import nahi hua" and "Employee hold". A `/2` or `/3` code in
+    the Gaon file is the zimmedar of the code before "/" (CTO 10 Nov 2026). A District that differs
+    from the named employee's own district is not imported ("District farq").
 - **Designations** that map to no role are rejected and tabled on "Designation - tasdeeq" (designation,
   rows, a blank role column for the department) and "Designation rows"; no role is assigned
   automatically.
@@ -123,8 +123,12 @@ pnpm inspect:file private/<hr-file>.xlsx --kind employees
 pnpm inspect:file private/<gaon-file>.xlsx --kind villages
 ```
 
-Ajeer Codes written `/2`, `/3` … are **held**: never imported, listed on the report sheet
-"Code 2, 3 - rukay hue" until the CTO decides their mapping.
+Ajeer Codes written `/2`, `/3` … (CTO 10 Nov 2026) are imported like any other row: the zimmedar
+logs in with the code **before "/"** (`12345/2` → `12345`); the full code stays in `ajeerCodeFull`,
+and the rows are listed on "Code 2, 3 - login pehla code". Several rows of one login code (e.g.
+`/1` and `/2`) with the **same name** are one person: one account from the first valid row, all rows
+listed on "Aik code - 1 aur 2". A different name on the same code is an error (first row kept), so
+two people are never merged into one account. The Tehsil-parent hold still applies to them.
 
 ## Initial passwords (CTO 7 Nov 2026)
 
