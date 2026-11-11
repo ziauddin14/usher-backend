@@ -7,20 +7,28 @@ import { headerKey, loadWorkbookBuffer } from '../../lib/xlsx.js';
 
 export const MAX_ERP_ROWS = 20_000;
 
-/** Column → accepted header texts (compared with headerKey: lower-case, letters and digits). */
+/**
+ * Column → accepted header texts (compared with headerKey: lower-case, letters and digits), best
+ * first. Both the short UsherDesk format and the E-Raseed "General" export (Cash and Material
+ * files, sample of 11 Nov 2026) are read: e.g. "User Login ID" = "ush" + Ajeer Code, "Donation
+ * Mode" = Cash / Material, "Amount In Base Currency", "Purpose Name" = mad, "Active / Cancel".
+ */
 export const ERP_COLUMNS = {
   receiptNo: ['receiptno', 'receiptnumber', 'raseedno', 'raseed', 'receipt'],
   lineNo: ['lineno', 'line', 'linenumber'],
   date: ['receiptdate', 'date', 'raseeddate'],
-  ajeerCode: ['ajeercode', 'ajeer', 'code'],
+  ajeerCode: ['ajeercode', 'userloginid', 'ajeer', 'code'],
   gaon: ['gaonname', 'gaon', 'village', 'villagename'],
-  type: ['attiyattype', 'atiyattype', 'type', 'kind'],
-  amount: ['amountrs', 'amount', 'raqam'],
-  mad: ['mad', 'category', 'head'],
-  item: ['jinsitem', 'item', 'material'],
-  qty: ['jinsqty', 'qty', 'quantity'],
-  qtyUnit: ['jinsunit', 'qtyunit'],
-  status: ['status'],
+  type: ['attiyattype', 'atiyattype', 'donationmode', 'type', 'kind'],
+  amount: ['amountrs', 'amountinbasecurrency', 'amount', 'raqam'],
+  mad: ['mad', 'purposename', 'category', 'head'],
+  item: ['jinsitem', 'materialitem', 'item', 'material'],
+  qty: ['jinsqty', 'weightqty', 'qty', 'quantity'],
+  qtyUnit: ['jinsunit', 'qtyunit', 'unit'],
+  status: ['status', 'activecancel'],
+  /** E-Raseed extras kept for later reports (Wajiba / Nafila; deposited or not). */
+  fund: ['fundcategory'],
+  deposit: ['depositundeposit'],
 } as const;
 export type ErpColumn = keyof typeof ERP_COLUMNS;
 
@@ -60,6 +68,9 @@ export interface ErpLine {
   qty?: number;
   qtyUnit?: string;
   cancelled: boolean;
+  fund?: string;
+  /** E-Raseed "Deposit / Undeposit": true = DEPOSITED, false = UNDEPOSIT, absent = not given. */
+  deposited?: boolean;
 }
 
 export type ErpFileProblem = 'EMPTY' | 'NO_HEADER' | 'TOO_MANY_ROWS' | 'UNREADABLE';
@@ -175,13 +186,24 @@ export function erpDate(raw: string): string | null {
   return isDateString(date) ? date : null;
 }
 
-/** Whole rupees: "5,000", "Rs 5000", "5000.00" → 5000; a fraction of a rupee or a sign → null. */
+/**
+ * Rupees as a whole number: "5,000", "Rs 5000", "5000.00" → 5000. The E-Raseed export writes some
+ * material values with floating-point noise ("2999.9999999999995"), so a fraction is rounded to the
+ * nearest rupee (money is stored as integer rupees). A sign or text → null.
+ */
 export function erpAmount(raw: string): number | null {
   const s = toWesternDigits(raw)
     .replace(/rs\.?|pkr|,|\s/gi, '')
     .trim();
-  const m = /^(\d{1,12})(?:\.0+)?$/.exec(s);
-  return m ? Number(m[1]) : null;
+  return /^\d{1,12}(?:\.\d+)?$/.test(s) ? Math.round(Number(s)) : null;
+}
+
+/** The ERP writes a missing value as the two characters backslash + "N" (MySQL NULL). */
+const ERP_NULL = `${String.fromCharCode(92)}N`;
+
+/** "ush76680" (E-Raseed login ID) or "76680/2" → the Ajeer Code; anything else → null. */
+export function erpAjeerCode(raw: string | undefined): string | null {
+  return normalizeAjeerCode(raw?.trim().replace(/^[a-z]+/i, ''));
 }
 
 function erpKind(raw: string): 'naqd' | 'jins' | null {
@@ -198,18 +220,24 @@ function erpCancelled(raw: string | undefined): boolean | null {
   return null;
 }
 
-/** Header row = the first row that has every required column; rows above it are titles. */
+/**
+ * Header row = the first row that has every required column; rows above it are titles. When two
+ * headers fit one column ("Amount" and "Amount In Base Currency"), the better-listed name wins.
+ */
 function findHeader(table: string[][]): { at: number; columns: Map<number, ErpColumn> } {
   let best: ErpColumn[] = [];
   for (let at = 0; at < Math.min(table.length, 20); at += 1) {
-    const columns = new Map<number, ErpColumn>();
+    const pick = new Map<ErpColumn, { col: number; rank: number }>();
     table[at]!.forEach((text, col) => {
       const k = headerKey(text);
-      const column = (Object.keys(ERP_COLUMNS) as ErpColumn[]).find((c) =>
-        (ERP_COLUMNS[c] as readonly string[]).includes(k),
-      );
-      if (column && ![...columns.values()].includes(column)) columns.set(col, column);
+      for (const c of Object.keys(ERP_COLUMNS) as ErpColumn[]) {
+        const rank = (ERP_COLUMNS[c] as readonly string[]).indexOf(k);
+        const prev = pick.get(c);
+        if (rank >= 0 && (!prev || rank < prev.rank)) pick.set(c, { col, rank });
+      }
     });
+    const columns = new Map<number, ErpColumn>();
+    for (const [c, { col }] of pick) if (!columns.has(col)) columns.set(col, c);
     const found = [...columns.values()];
     if (REQUIRED.every((c) => found.includes(c))) return { at, columns };
     if (found.length > best.length) best = found;
@@ -227,7 +255,13 @@ function findHeader(table: string[][]): { at: number; columns: Map<number, ErpCo
 export function checkErpRows(
   table: string[][],
   today: string,
-): { lines: ErpLine[]; errors: ErpRowError[]; rows: number } {
+): {
+  lines: ErpLine[];
+  errors: ErpRowError[];
+  rows: number;
+  /** Highest line number of each receipt in the file (a saved line above it was removed). */
+  receiptLines: Map<string, number>;
+} {
   const { at, columns } = findHeader(table);
   const dataRows = table
     .slice(at + 1)
@@ -239,11 +273,16 @@ export function checkErpRows(
   const lines: ErpLine[] = [];
   const errors: ErpRowError[] = [];
   const seen = new Set<string>();
+  // Without a line_no column (the E-Raseed export), a receipt's rows are its lines 1, 2, … in file
+  // order (one receipt can hold several mad or material items).
+  const hasLineNo = [...columns.values()].includes('lineNo');
+  const linesOf = new Map<string, number>();
+  const receiptLines = new Map<string, number>();
   for (const { row, cells } of dataRows) {
     const v: Partial<Record<ErpColumn, string>> = {};
     for (const [col, column] of columns) {
       const text = cells[col]?.trim();
-      if (text) v[column] = text;
+      if (text && text !== ERP_NULL) v[column] = text;
     }
     const fail = (reason: ErpRowReason) => errors.push({ row, reason });
 
@@ -252,11 +291,18 @@ export function checkErpRows(
       fail('RECEIPT_NO_MISSING');
       continue;
     }
-    const lineNo = v.lineNo === undefined ? 1 : Number(toWesternDigits(v.lineNo));
+    const nth = (linesOf.get(receiptNo) ?? 0) + 1;
+    linesOf.set(receiptNo, nth);
+    const lineNo = !hasLineNo
+      ? nth
+      : v.lineNo === undefined
+        ? 1
+        : Number(toWesternDigits(v.lineNo));
     if (!Number.isInteger(lineNo) || lineNo < 1) {
       fail('LINE_NO_INVALID');
       continue;
     }
+    receiptLines.set(receiptNo, Math.max(receiptLines.get(receiptNo) ?? 0, lineNo));
     const key = `${receiptNo}\u0000${lineNo}`;
     if (seen.has(key)) {
       fail('DUPLICATE_IN_FILE');
@@ -272,7 +318,7 @@ export function checkErpRows(
       fail('DATE_IN_FUTURE');
       continue;
     }
-    const ajeerCode = normalizeAjeerCode(v.ajeerCode);
+    const ajeerCode = erpAjeerCode(v.ajeerCode);
     if (!ajeerCode) {
       fail('AJEER_CODE_INVALID');
       continue;
@@ -319,7 +365,9 @@ export function checkErpRows(
       ...(qty !== undefined ? { qty } : {}),
       ...(v.qtyUnit ? { qtyUnit: v.qtyUnit.slice(0, 20) } : {}),
       cancelled,
+      ...(v.fund ? { fund: v.fund.slice(0, 40) } : {}),
+      ...(v.deposit ? { deposited: !/^un/i.test(v.deposit) } : {}),
     });
   }
-  return { lines, errors, rows: dataRows.length };
+  return { lines, errors, rows: dataRows.length, receiptLines };
 }

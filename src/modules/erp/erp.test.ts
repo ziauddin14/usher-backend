@@ -146,6 +146,38 @@ describe('ERP receipts upload and reports', () => {
     expect(await ErpReceipt.countDocuments({ cancelled: true })).toBe(1);
   });
 
+  it('a receipt edited in the ERP to fewer lines: the missing line is cancelled', async () => {
+    const before = await ErpReceipt.countDocuments();
+    const res = await upload(
+      pakistan,
+      file([`R-100,1,2026-11-10,9090412,${gaon},NAQAD,20000,Telethon,,,,ACTIVE`]),
+      false,
+    ).expect(200);
+    expect(res.body).toMatchObject({ unchanged: 1, updated: 1 });
+    // Preview only: put it back as it was (both lines) before the report checks below.
+    expect(await ErpReceipt.countDocuments({ receiptNo: 'R-100', cancelled: false })).toBe(2);
+    const saved = await upload(
+      pakistan,
+      file([`R-100,1,2026-11-10,9090412,${gaon},NAQAD,20000,Telethon,,,,ACTIVE`]),
+      true,
+    ).expect(201);
+    expect(saved.body).toMatchObject({ updated: 1 });
+    expect(await ErpReceipt.countDocuments()).toBe(before); // nothing deleted
+    expect(await ErpReceipt.findOne({ receiptNo: 'R-100', lineNo: 2 }).lean()).toMatchObject({
+      cancelled: true,
+    });
+    // The ERP brings the line back: it counts again.
+    await upload(
+      pakistan,
+      file([
+        `R-100,1,2026-11-10,9090412,${gaon},NAQAD,20000,Telethon,,,,ACTIVE`,
+        `R-100,2,2026-11-10,9090412,${gaon},NAQAD,25000,Ramzan,,,,`,
+      ]),
+      true,
+    ).expect(201);
+    expect(await ErpReceipt.countDocuments({ receiptNo: 'R-100', cancelled: false })).toBe(2);
+  });
+
   it('the District sees each zimmedar; the Division its Districts; by mad everywhere', async () => {
     const q = 'period=day&date=2026-11-10';
     const d = await get(district, `/dash/units/GHOTKI/erp?${q}`).expect(200);

@@ -1,6 +1,14 @@
 import ExcelJS from 'exceljs';
 import { describe, expect, it } from 'vitest';
-import { checkErpRows, erpAmount, erpDate, ErpFileError, parseCsv, readErpTable } from './parse.js';
+import {
+  checkErpRows,
+  erpAjeerCode,
+  erpAmount,
+  erpDate,
+  ErpFileError,
+  parseCsv,
+  readErpTable,
+} from './parse.js';
 
 const HEADER =
   'receipt_no,line_no,receipt_date,ajeer_code,gaon_name,attiyat_type,amount_rs,mad,jins_item,jins_qty,jins_unit,status';
@@ -27,8 +35,62 @@ describe('ERP file reading (CTO 11 Nov 2026)', () => {
     expect(erpAmount('5,000')).toBe(5000);
     expect(erpAmount('Rs 1500')).toBe(1500);
     expect(erpAmount('2500.00')).toBe(2500);
-    expect(erpAmount('2500.50')).toBeNull();
+    // E-Raseed writes some values with floating-point noise: rounded to the nearest rupee.
+    expect(erpAmount('2999.9999999999995')).toBe(3000);
+    expect(erpAmount('2500.50')).toBe(2501);
     expect(erpAmount('-20')).toBeNull();
+    expect(erpAmount('abc')).toBeNull();
+    expect(erpAjeerCode('ush76680')).toBe('76680');
+    expect(erpAjeerCode('USh76680')).toBe('76680');
+    expect(erpAjeerCode('76680/2')).toBe('76680');
+    expect(erpAjeerCode('ush03001234567')).toBeNull(); // not an Ajeer Code
+  });
+
+  it('reads the E-Raseed "General" export (Cash and Material files) as it is downloaded', () => {
+    // Invented values in the export's own columns (sample files of 11 Nov 2026, 91 columns).
+    const NULL = `${String.fromCharCode(92)}N`;
+    const header =
+      '"Region","Receipt Date","Initial Receipt Date","Receipt Number","Donor Name","User Mobile Number","User Login ID","Donation Mode","Donation Type","Purpose Name","Fund Category","Amount","Amount In Base Currency","Deposit / Undeposit","Material Item","Weight / QTY","Unit","Active / Cancel"';
+    const csv = [
+      header,
+      `"Sindh","2026-11-09","2026-11-01","KHI-USH-ER-1","Donor A","+923000000000","ush1234567","Cash","SADQAT E NAFILA","Telethon Dawat-e-islami 2025","Nafila","20000","20000","DEPOSITED",${NULL},${NULL},${NULL},"ACTIVE"`,
+      `"Sindh","2026-11-09","2026-11-01","KHI-USH-ER-1","Donor A","+923000000000","ush1234567","Cash","SADQAT E WAJIBA","Ramzan","Wajiba","25000","25000","UNDEPOSIT",${NULL},${NULL},${NULL},"ACTIVE"`,
+      `"Sindh","2026-11-10","2026-11-10","M-KHI-USH-ER-7","Donor B","+923000000000","USH1234567","Material","DONATION ITEM NAFILA","Langer-e-Razavia","Nafila","2999.9999999999995","2999.9999999999995","","Rice Nafila","40","KG","ACTIVE"`,
+      `"Sindh","2026-11-10","2026-11-10","KHI-USH-ER-2","Donor C","+923000000000","ush1234567","Cash","SADQAT E NAFILA","For All Purpose",${NULL},"700","700","DEPOSITED",${NULL},${NULL},${NULL},"CANCEL"`,
+    ].join('\n');
+    const { lines, errors, receiptLines } = checkErpRows(parseCsv(csv), '2026-11-11');
+    expect(errors).toEqual([]);
+    expect(lines.map((l) => `${l.receiptNo}/${l.lineNo}`)).toEqual([
+      'KHI-USH-ER-1/1',
+      'KHI-USH-ER-1/2',
+      'M-KHI-USH-ER-7/1',
+      'KHI-USH-ER-2/1',
+    ]);
+    expect(lines[0]).toEqual({
+      row: 2,
+      receiptNo: 'KHI-USH-ER-1',
+      lineNo: 1,
+      date: '2026-11-09',
+      ajeerCode: '1234567',
+      kind: 'naqd',
+      amount: 20000,
+      mad: 'Telethon Dawat-e-islami 2025',
+      cancelled: false,
+      fund: 'Nafila',
+      deposited: true,
+    });
+    expect(lines[1]).toMatchObject({ mad: 'Ramzan', deposited: false });
+    expect(lines[2]).toMatchObject({
+      kind: 'jins',
+      amount: 3000,
+      item: 'Rice Nafila',
+      qty: 40,
+      qtyUnit: 'KG',
+    });
+    expect(lines[2]!.deposited).toBeUndefined();
+    expect(lines[3]).toMatchObject({ cancelled: true });
+    expect(lines[3]!.fund).toBeUndefined();
+    expect(receiptLines.get('KHI-USH-ER-1')).toBe(2);
   });
 
   it('checks every row; a bad row is reported, the others kept', () => {

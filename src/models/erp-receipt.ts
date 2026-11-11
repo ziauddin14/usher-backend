@@ -31,6 +31,10 @@ const erpReceiptSchema = new Schema(
     qty: { type: Number, min: 0 },
     qtyUnit: { type: String },
     cancelled: { type: Boolean, required: true, default: false },
+    /** E-Raseed "Fund Category" (Wajiba / Nafila / Defined Purpose), when given. */
+    fund: { type: String },
+    /** E-Raseed "Deposit / Undeposit" (cash only): true = DEPOSITED, false = UNDEPOSIT. */
+    deposited: { type: Boolean },
     /** The upload that last wrote this line. */
     uploadId: { type: Schema.Types.ObjectId, ref: 'ErpUpload', required: true },
   },

@@ -48,6 +48,8 @@ const COMPARED = [
   'qty',
   'qtyUnit',
   'cancelled',
+  'fund',
+  'deposited',
 ] as const;
 
 const same = (a: unknown, b: unknown) => (a ?? null) === (b ?? null);
@@ -146,9 +148,19 @@ export async function erpUpload(
     };
   });
 
+  // A saved line above the receipt's last line in this file no longer exists in the ERP (the
+  // receipt was edited): it is cancelled, never deleted.
+  const removed = existing.filter(
+    (e) =>
+      !e.cancelled &&
+      checked.receiptLines.has(e.receiptNo) &&
+      e.lineNo > checked.receiptLines.get(e.receiptNo)!,
+  );
+
   const active = lines.filter((l) => !l.cancelled);
   const dates = lines.map((l) => l.date).sort();
-  const count = (c: Change) => changes.filter((x) => x.change === c).length;
+  const count = (c: Change) =>
+    changes.filter((x) => x.change === c).length + (c === 'updated' ? removed.length : 0);
   const byReason: Partial<Record<ErpRowReason, number>> = {};
   for (const e of errors) byReason[e.reason] = (byReason[e.reason] ?? 0) + 1;
   errors.sort((a, b) => a.row - b.row);
@@ -203,7 +215,16 @@ export async function erpUpload(
         uploadId: upload._id,
       };
       const unset: Record<string, ''> = {};
-      for (const k of ['villageName', 'villageId', 'mad', 'item', 'qty', 'qtyUnit'] as const) {
+      for (const k of [
+        'villageName',
+        'villageId',
+        'mad',
+        'item',
+        'qty',
+        'qtyUnit',
+        'fund',
+        'deposited',
+      ] as const) {
         if (doc[k] === undefined) {
           delete doc[k];
           unset[k] = '';
@@ -217,6 +238,15 @@ export async function erpUpload(
         },
       };
     });
+  for (const e of removed) {
+    writes.push({
+      updateOne: {
+        filter: { receiptNo: e.receiptNo, lineNo: e.lineNo },
+        update: { $set: { cancelled: true, uploadId: upload._id } },
+        upsert: false,
+      },
+    });
+  }
   for (let i = 0; i < writes.length; i += 1000) {
     await ErpReceipt.bulkWrite(writes.slice(i, i + 1000), { ordered: false });
   }

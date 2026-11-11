@@ -242,3 +242,27 @@ case, spaces or `_`):
 | `jins_item`, `jins_qty`, `jins_unit` | item required for JINS | e.g. `Chawal`, `40`, `KG` |
 | `status` | no (ACTIVE) | `ACTIVE` or `CANCELLED` |
 | `suba`, `division`, `district`, `tehsil` | no | ignored — the unit comes from the Ajeer Code |
+
+### The E-Raseed "General" export as it is downloaded (sample of 11 Nov 2026)
+
+The ERP gives two CSV files, **Cash** and **Material**, with 91 columns each; they are uploaded one
+after the other, unchanged. The browser keeps only the columns below before upload (donor names,
+mobiles and the other ~78 columns never leave the computer; a month of cash went from 9.5 MB to
+1.2 MB). Mapping:
+
+| E-Raseed column | Read as |
+|---|---|
+| `Receipt Number` | receipt; its rows are lines 1, 2, … in file order (no line column in the export) |
+| `Receipt Date` | the date of the receipt (`Initial Receipt Date` is not used — open question) |
+| `User Login ID` | `ush` + Ajeer Code (any letter case); other IDs (e.g. `ush` + 11 digits) = row error |
+| `Donation Mode` | `Cash` → naqad, `Material` → jins |
+| `Amount In Base Currency` | rupees, rounded to the nearest rupee (some values carry float noise) |
+| `Purpose Name` | mad (e.g. "Telethon Dawat-e-islami 2025") |
+| `Fund Category` | kept (Wajiba / Nafila) |
+| `Deposit / Undeposit` | kept (cash only); every active receipt counts for now — open question |
+| `Material Item`, `Weight / QTY`, `Unit` | jins item, quantity, unit |
+| `Active / Cancel` | `CANCEL` lines never count |
+
+`\N` (the export's empty value) is read as empty. The export has **no Gaon column**: those lines
+have no Gaon. When a later file has fewer lines for a receipt, the missing saved lines are
+cancelled (never deleted).
