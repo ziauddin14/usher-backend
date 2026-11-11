@@ -184,3 +184,18 @@ two people are never merged into one account. The Tehsil-parent hold still appli
   employee — no account is created and its responsible person stays blank. Only confirmed names
   (an existing unit or a `district-names.csv` entry); other names are listed on "District - tasdeeq
   baqi" and no unit is created.
+
+## Date range for reports (CTO 11 Nov 2026)
+
+- `period=range&from=YYYY-MM-DD&date=YYYY-MM-DD` (`date` = the last day, today when missing) on
+  `GET /me/summary`, `GET /me/export.xlsx`, `GET /dash/units/:code/{overview,zimmedaran,children}`
+  and `GET /dash/export.xlsx`. The same scope rules as every other period.
+- Checked once (`src/lib/date-range.ts`): `from` is required, on or before the last day, never after
+  today, at most 366 days. Otherwise 400 `VALIDATION_FAILED`.
+- A single day stays `period=day&date=…`. Excel names a range `…-range-<from>_<to>.xlsx`.
+
+## Keep-alive behind the proxy
+
+Both servers (`src/server.ts`, `scripts/dev.ts`) keep idle connections for 65 s
+(`src/lib/keep-alive.ts`), longer than the proxy in front of the API, so a reused socket is never
+one the server has just closed (Node's 5 s default showed up as ECONNRESET / "socket hang up").

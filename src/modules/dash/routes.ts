@@ -15,20 +15,20 @@ export function dashRouter(): Router {
 
   router.get('/units/:code/overview', async (req, res) => {
     const { code } = parse(unitParams, req.params);
-    const { period, date } = parse(periodQuery, req.query);
-    res.json(await overview(currentUser(req), code, period, date));
+    const { period, date, from } = parse(periodQuery, req.query);
+    res.json(await overview(currentUser(req), code, period, date, from));
   });
 
   router.get('/units/:code/zimmedaran', async (req, res) => {
     const { code } = parse(unitParams, req.params);
-    const { period, date } = parse(periodQuery, req.query);
-    res.json(await zimmedaranTable(currentUser(req), code, period, date));
+    const { period, date, from } = parse(periodQuery, req.query);
+    res.json(await zimmedaranTable(currentUser(req), code, period, date, from));
   });
 
   router.get('/units/:code/children', async (req, res) => {
     const { code } = parse(unitParams, req.params);
-    const { period, date } = parse(periodQuery, req.query);
-    res.json(await childrenTable(currentUser(req), code, period, date));
+    const { period, date, from } = parse(periodQuery, req.query);
+    res.json(await childrenTable(currentUser(req), code, period, date, from));
   });
 
   router.get('/units/:code/villages', async (req, res) => {

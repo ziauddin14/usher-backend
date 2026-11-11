@@ -147,12 +147,12 @@ function pillOf(
  * Rows for every active zimmedar whose unit path is `path` or below it, for the period around
  * `date`. Shared by the zimmedaran table (B1), the children table (B2) and the KPI tiles.
  */
-async function zimmedarRows(path: string, period: DashPeriod, date: string) {
+async function zimmedarRows(path: string, period: DashPeriod, date: string, rangeFrom?: string) {
   const settings = await getSettings();
   const rules = await getRewardRules();
   const today = karachiDate();
   const day = date > today ? today : date;
-  const { from, to } = periodRange(period, day, today, settings.weekStartsOn, rules);
+  const { from, to } = periodRange(period, day, today, settings.weekStartsOn, rules, rangeFrom);
 
   // One row per unique active zimmedar of the unit: this is the denominator of both percentages,
   // and every count below is per person (a jadwal of an inactive or moved user is not counted).
@@ -267,9 +267,15 @@ function daysIn(from: string, to: string): number {
 }
 
 /** GET /dash/units/:code/overview */
-export async function overview(caller: AuthUser, code: string, period: DashPeriod, date?: string) {
+export async function overview(
+  caller: AuthUser,
+  code: string,
+  period: DashPeriod,
+  date?: string,
+  rangeFrom?: string,
+) {
   const unit = await unitInScope(caller, code);
-  const data = await zimmedarRows(unit.path, period, date ?? karachiDate());
+  const data = await zimmedarRows(unit.path, period, date ?? karachiDate(), rangeFrom);
   return {
     unit,
     breadcrumb: await breadcrumb(caller, unit),
@@ -290,9 +296,10 @@ export async function zimmedaranTable(
   code: string,
   period: DashPeriod,
   date?: string,
+  rangeFrom?: string,
 ) {
   const unit = await unitInScope(caller, code);
-  const data = await zimmedarRows(unit.path, period, date ?? karachiDate());
+  const data = await zimmedarRows(unit.path, period, date ?? karachiDate(), rangeFrom);
   return {
     unit,
     period: data.period,
@@ -310,6 +317,7 @@ export async function childrenTable(
   code: string,
   period: DashPeriod,
   date?: string,
+  rangeFrom?: string,
 ) {
   const unit = await unitInScope(caller, code);
   // District and Tehsil dashboards list their Ushar Zimmedaran (/zimmedaran), as before.
@@ -320,7 +328,7 @@ export async function childrenTable(
     .select('code name nameUr level path')
     .sort({ name: 1 })
     .lean();
-  const data = await zimmedarRows(unit.path, period, date ?? karachiDate());
+  const data = await zimmedarRows(unit.path, period, date ?? karachiDate(), rangeFrom);
   const rows = children.map((c) => {
     const mine = data.rows.filter(
       (r) => r.unitPath === c.path || r.unitPath.startsWith(`${c.path}/`),

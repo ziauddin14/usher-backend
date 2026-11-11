@@ -46,6 +46,10 @@ async function workbook(title: string, header: string[], rows: Cell[][], totals:
 
 const sum = (rows: { kpis: Kpis }[], key: keyof Kpis) => rows.reduce((s, r) => s + r.kpis[key], 0);
 
+/** File-name part of a period: its day, or "from_to" for a custom range. */
+const span = (d: { period: string; date: string; from: string; to: string }) =>
+  d.period === 'range' ? `${d.from}_${d.to}` : d.date;
+
 export async function dashExport(
   caller: AuthUser,
   q: {
@@ -54,6 +58,7 @@ export async function dashExport(
     userId?: string;
     period: DashPeriod;
     date?: string;
+    from?: string;
     month?: string;
   },
 ): Promise<{ file: Buffer; name: string }> {
@@ -121,7 +126,7 @@ export async function dashExport(
 
   if (!q.code) throw new AppError(400, 'VALIDATION_FAILED', 'code is required');
   if (q.view === 'zimmedaran') {
-    const t = await zimmedaranTable(caller, q.code, q.period, q.date);
+    const t = await zimmedaranTable(caller, q.code, q.period, q.date, q.from);
     const file = await workbook(
       `${t.unit.name} — Zimmedaran · ${t.from} – ${t.to}`,
       [
@@ -171,10 +176,10 @@ export async function dashExport(
         '',
       ],
     );
-    return { file, name: `UsherDesk-${t.unit.code}-${t.period}-${t.date}.xlsx` };
+    return { file, name: `UsherDesk-${t.unit.code}-${t.period}-${span(t)}.xlsx` };
   }
 
-  const c = await childrenTable(caller, q.code, q.period, q.date);
+  const c = await childrenTable(caller, q.code, q.period, q.date, q.from);
   const tiers = c.rows[0]?.onTrack.map((o) => o.amount) ?? [];
   const file = await workbook(
     `${c.unit.name} — ${c.childLevel} · ${c.from} – ${c.to}`,
@@ -218,5 +223,5 @@ export async function dashExport(
       ...tiers.map((_, i) => c.rows.reduce((s, r) => s + (r.onTrack[i]?.count ?? 0), 0)),
     ],
   );
-  return { file, name: `UsherDesk-${c.unit.code}-${c.period}-${c.date}.xlsx` };
+  return { file, name: `UsherDesk-${c.unit.code}-${c.period}-${span(c)}.xlsx` };
 }
