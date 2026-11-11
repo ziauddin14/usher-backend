@@ -46,7 +46,8 @@ function monthEnd(date: string): string {
 /**
  * Date range of a period around `date` (Karachi days), never past today:
  * day = that day · week = the week (settings.weekStartsOn, Monday) · month = the calendar month ·
- * reward = the six-month reward period (settings.reward.periods).
+ * reward = the six-month reward period (settings.reward.periods) ·
+ * range = `rangeFrom` … `date` (CTO 11 Nov 2026; checked by refineRange).
  */
 export function periodRange(
   period: SummaryPeriod,
@@ -54,9 +55,11 @@ export function periodRange(
   today: string,
   weekStartsOn: number,
   rules: Pick<RewardRules, 'periods'>,
+  rangeFrom?: string,
 ): { from: string; to: string } {
   const clamp = (d: string) => (d > today ? today : d);
   if (period === 'day') return { from: date, to: date };
+  if (period === 'range') return { from: rangeFrom ?? date, to: clamp(date) };
   if (period === 'week') {
     const from = addDays(date, -((weekday(date) - weekStartsOn + 7) % 7));
     return { from, to: clamp(addDays(from, 6)) };
@@ -94,7 +97,10 @@ function sumKpis(days: DayRow[]): Kpis {
 }
 
 /** GET /me/summary — KPIs of the period + the last 7 days' wusooli (null = no record). */
-export async function summary(user: AuthUser, opts: { period: SummaryPeriod; date?: string }) {
+export async function summary(
+  user: AuthUser,
+  opts: { period: SummaryPeriod; date?: string; from?: string },
+) {
   const settings = await getSettings();
   const today = karachiDate();
   const date = opts.date && opts.date < today ? opts.date : today;
@@ -104,6 +110,7 @@ export async function summary(user: AuthUser, opts: { period: SummaryPeriod; dat
     today,
     settings.weekStartsOn,
     await getRewardRules(),
+    opts.from,
   );
 
   const sevenFrom = addDays(date, -6);
@@ -177,7 +184,10 @@ export async function reward(user: AuthUser) {
 }
 
 /** Rows for GET /me/export.xlsx: every day of the period (null = no record) + totals. */
-export async function exportRows(user: AuthUser, opts: { period: SummaryPeriod; date?: string }) {
+export async function exportRows(
+  user: AuthUser,
+  opts: { period: SummaryPeriod; date?: string; from?: string },
+) {
   const settings = await getSettings();
   const today = karachiDate();
   const date = opts.date && opts.date < today ? opts.date : today;
@@ -187,6 +197,7 @@ export async function exportRows(user: AuthUser, opts: { period: SummaryPeriod; 
     today,
     settings.weekStartsOn,
     await getRewardRules(),
+    opts.from,
   );
   const days = await submittedDays(user, from, to);
   const byDate = new Map(days.map((d) => [d.date, d]));

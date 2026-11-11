@@ -129,6 +129,45 @@ describe('zimmedar khulasa, reward and export (A11, A12)', () => {
     expect(previous.kpis.rewardWusooli).toBe(1_284_000);
   });
 
+  it('a date range (CTO 11 Nov 2026): exactly the days from … to, same totals as day by day', async () => {
+    const r = await summary('period=range&from=2026-10-01&date=2026-10-03');
+    expect([r.from, r.to]).toEqual(['2026-10-01', '2026-10-03']);
+    let recordDays = 0;
+    let wusooli = 0;
+    for (const d of ['2026-10-01', '2026-10-02', '2026-10-03']) {
+      const s = await summary(`period=day&date=${d}`);
+      recordDays += s.recordDays;
+      wusooli += s.kpis.wusooli ?? 0;
+    }
+    expect(r.recordDays).toBe(recordDays);
+    expect(r.kpis.wusooli).toBe(wusooli);
+    // One day as a range = that day; an open end stops at today.
+    expect((await summary('period=range&from=2026-10-02&date=2026-10-02')).kpis).toEqual(
+      (await summary('period=day&date=2026-10-02')).kpis,
+    );
+    expect((await summary('period=range&from=2026-10-25')).to).toBe(TODAY);
+    // Checked: a start is required, never after the end, and at most a year.
+    for (const bad of [
+      'period=range&date=2026-10-03',
+      'period=range&from=2026-10-05&date=2026-10-03',
+      'period=range&from=2025-01-01&date=2026-10-03',
+      'period=range&from=2026-13-01&date=2026-10-03',
+    ]) {
+      expect((await get(`/me/summary?${bad}`)).status, bad).toBe(400);
+    }
+    const x = await get('/me/export.xlsx?period=range&from=2026-10-01&date=2026-10-03')
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => cb(null, Buffer.concat(chunks)));
+      })
+      .expect(200);
+    expect(x.headers['content-disposition']).toContain(
+      'UsherDesk-9090412-range-2026-10-01_2026-10-03.xlsx',
+    );
+  });
+
   it('a zimmedar moved to another district keeps the own history (own userId, not unit path)', async () => {
     const before = await reward();
     const arifUser = await User.findOne({ ajeerCode: '9090412' }).lean();

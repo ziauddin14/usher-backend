@@ -221,6 +221,48 @@ describe('dashboards (B1 / B2)', () => {
     await get('/dash/units/GHOTKI/children', district).expect(400);
   });
 
+  it('a date range (CTO 11 Nov 2026): each row = the same days added up; scope and Excel unchanged', async () => {
+    const q = 'period=range&from=2026-10-01&date=2026-10-03';
+    const range = (await get(`/dash/units/GHOTKI/zimmedaran?${q}`, district).expect(200)).body as {
+      from: string;
+      to: string;
+      rows: Row[];
+    };
+    expect([range.from, range.to]).toEqual(['2026-10-01', '2026-10-03']);
+    const sum = new Map<string, number>();
+    for (const d of ['2026-10-01', '2026-10-02', '2026-10-03']) {
+      const day = (
+        await get(`/dash/units/GHOTKI/zimmedaran?period=day&date=${d}`, district).expect(200)
+      ).body as { rows: Row[] };
+      for (const r of day.rows)
+        sum.set(r.ajeerCode, (sum.get(r.ajeerCode) ?? 0) + (r.kpis.wusooli ?? 0));
+    }
+    expect(range.rows.length).toBeGreaterThan(0);
+    for (const r of range.rows) expect(r.kpis.wusooli, r.ajeerCode).toBe(sum.get(r.ajeerCode) ?? 0);
+    expect(
+      (await get(`/dash/units/GHOTKI/overview?${q}`, district).expect(200)).body,
+    ).toMatchObject({
+      period: 'range',
+      from: '2026-10-01',
+      to: '2026-10-03',
+      calendarDays: 3,
+    });
+    await get(`/dash/units/SUKKUR/children?${q}`, division).expect(200);
+    await get('/dash/units/GHOTKI/overview?period=range&date=2026-10-03', district).expect(400);
+    await get(`/dash/units/LARKANA_DIST/overview?${q}`, district).expect(404); // scope unchanged
+    const x = await get(`/dash/export.xlsx?view=zimmedaran&code=GHOTKI&${q}`, district)
+      .buffer(true)
+      .parse((res, cb) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => cb(null, Buffer.concat(chunks)));
+      })
+      .expect(200);
+    expect(x.headers['content-disposition']).toContain(
+      'UsherDesk-GHOTKI-range-2026-10-01_2026-10-03.xlsx',
+    );
+  });
+
   it('zimmedar detail: day list in scope only', async () => {
     const arif = await User.findOne({ ajeerCode: '9090412' }).lean();
     const days = (
