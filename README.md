@@ -199,3 +199,46 @@ two people are never merged into one account. The Tehsil-parent hold still appli
 Both servers (`src/server.ts`, `scripts/dev.ts`) keep idle connections for 65 s
 (`src/lib/keep-alive.ts`), longer than the proxy in front of the API, so a reused socket is never
 one the server has just closed (Node's 5 s default showed up as ECONNRESET / "socket hang up").
+
+## Bus fare at the end of the day (CTO 11 Nov 2026)
+
+`POST /jadwals` with `travel: { mode: 'bus' }` no longer needs a fare. `POST /jadwals/:id/submit`
+takes `fare` (integer rupees, 0 allowed) and needs one on a bus day (400 `FARE_REQUIRED`). A fare
+sent at the start by an older app, or kept from before a reopen, is used when none is sent.
+
+## ERP (E-Raseed) receipts upload (CTO 11 Nov 2026)
+
+The Pakistan level uploads the ERP's daily receipts file; every dashboard (own scope) and every
+zimmedar then sees the receipts by zimmedar, Gaon and mad. The zimmedar keeps typing only his
+day's total in the jadwal; the ERP brings the details. The reward is **not** changed by this.
+
+- `POST /erp/uploads?name=<file>&commit=false|true` (role `pakistan`), body = the file bytes (CSV
+  UTF-8 or .xlsx, max 5 MB / 20,000 rows). `commit=false` only checks (nothing saved);
+  `commit=true` saves the valid rows (201) and writes an `ERP_UPLOAD` audit log. Rows with an
+  error are never saved; the answer lists them by row number and reason (no personal data).
+- A line is `(receipt_no, line_no)`: the same file twice adds nothing; a changed line (e.g. now
+  `CANCELLED`) is updated. Nothing is deleted. Cancelled lines never count.
+- `GET /erp/uploads` (last 20 uploads, counts only), `GET /erp/template.csv` (the format with
+  invented sample rows, for the ERP / Finance team).
+- Reports: `GET /dash/units/:code/erp?period=…` (totals, by mad, one row per child unit or, for a
+  District / Tehsil, per zimmedar — 0 when the ERP has nothing for him) and `GET /me/erp?period=…`
+  (own totals, by Gaon, by mad, lines). Same periods and date range as the other reports.
+- Collections `erpReceipts` (unique `receiptNo + lineNo`; indexes `unitPath + date`,
+  `userId + date`) and `erpUploads`. A line is filed under the zimmedar's unit when first saved.
+
+File format (header row required; titles above it are skipped; header names are matched without
+case, spaces or `_`):
+
+| Column | Required | Notes |
+|---|---|---|
+| `receipt_no` | yes | ERP receipt number |
+| `line_no` | no (1) | when one receipt has several lines (mad / material) |
+| `receipt_date` | yes | `YYYY-MM-DD` or day-first `DD/MM/YYYY`; not after today |
+| `ajeer_code` | yes | the zimmedar; `12345/2` counts as `12345` (login code). Unknown code = row error |
+| `gaon_name` | no | linked to a Gaon of the zimmedar's District when the name matches one Gaon |
+| `attiyat_type` | yes | `NAQAD` (cash) or `JINS` (material) |
+| `amount_rs` | yes | whole rupees (`5,000` and `5000.00` accepted); NAQAD > 0; JINS = its value |
+| `mad` | no | as the ERP names it (not mapped to the app's atiyat categories) |
+| `jins_item`, `jins_qty`, `jins_unit` | item required for JINS | e.g. `Chawal`, `40`, `KG` |
+| `status` | no (ACTIVE) | `ACTIVE` or `CANCELLED` |
+| `suba`, `division`, `district`, `tehsil` | no | ignored — the unit comes from the Ajeer Code |

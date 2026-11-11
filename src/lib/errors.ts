@@ -67,6 +67,17 @@ export const errorHandler: ErrorRequestHandler = (err: unknown, _req, res, _next
     res.status(400).json({ error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } });
     return;
   }
+  // A body over the route's limit (express.json / express.raw).
+  if (err instanceof Error && 'type' in err && err.type === 'entity.too.large') {
+    res.status(413).json({
+      error: {
+        code: 'VALIDATION_FAILED',
+        message: 'Request body too large',
+        details: { reason: 'TOO_LARGE' },
+      },
+    });
+    return;
+  }
   // No database: a clear 503 (the screens say "server is not reachable"), not a generic 500.
   if (isDbUnavailable(err)) {
     console.error(`[db] database not reachable: ${(err as Error).name}`);

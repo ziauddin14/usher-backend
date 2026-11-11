@@ -91,7 +91,12 @@ async function dropSheets(zip: JSZip, skip: RegExp): Promise<boolean> {
 
 /** Load an .xlsx file, tolerating exporter quirks. */
 export async function loadWorkbook(file: string): Promise<ExcelJS.Workbook> {
-  const buffer = await normalizePackage(await readFile(file));
+  return loadWorkbookBuffer(await readFile(file));
+}
+
+/** Load .xlsx bytes (e.g. an uploaded file), tolerating the same exporter quirks. */
+export async function loadWorkbookBuffer(bytes: Buffer): Promise<ExcelJS.Workbook> {
+  const buffer = await normalizePackage(bytes);
   const workbook = new ExcelJS.Workbook();
   // ExcelJS types `load` with its own Buffer interface.
   await workbook.xlsx.load(buffer as unknown as ArrayBuffer);

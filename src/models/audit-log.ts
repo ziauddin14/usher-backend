@@ -22,6 +22,8 @@ export const AUDIT_ACTIONS = [
   'VILLAGE_RENAME',
   // Own mobile set, changed or removed by the user (no verification, CTO 7 Nov 2026).
   'MOBILE_UPDATE',
+  // Daily E-Raseed (ERP) receipts file uploaded at Pakistan level (CTO 11 Nov 2026).
+  'ERP_UPLOAD',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
