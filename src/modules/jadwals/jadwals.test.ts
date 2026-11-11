@@ -142,14 +142,38 @@ describe('starting a day', () => {
     ).toBe(1);
   });
 
-  it('amli needs travel: bike meter start or bus fare (0 allowed)', async () => {
+  it('amli needs travel: bike meter start, or bus (fare not asked at the start)', async () => {
     await api(arif).post('/jadwals', { entryType: 'amli' }).expect(400);
     await api(arif)
       .post('/jadwals', { entryType: 'amli', travel: { mode: 'bike' } })
       .expect(400);
     await api(arif)
+      .post('/jadwals', { entryType: 'amli', travel: { mode: 'bus' } })
+      .expect(201);
+  });
+
+  it('bus fare is entered when the day ends (CTO 11 Nov 2026); 0 allowed, missing = 400', async () => {
+    const start = await api(arif)
+      .post('/jadwals', { entryType: 'amli', travel: { mode: 'bus' } })
+      .expect(201);
+    const id = start.body.jadwal.id as string;
+    await api(arif).post(`/jadwals/${id}/visits`, { villageId: villageIds[0]! }).expect(201);
+    const missing = await api(arif).post(`/jadwals/${id}/submit`, {}).expect(400);
+    expect(missing.body.error.details.reason).toBe('FARE_REQUIRED');
+    await api(arif).post(`/jadwals/${id}/submit`, { fare: -5 }).expect(400);
+    const done = await api(arif).post(`/jadwals/${id}/submit`, { fare: 350 }).expect(200);
+    expect(done.body.jadwal.travel).toMatchObject({ mode: 'bus', fare: 350 });
+    expect(done.body.jadwal.totals.fare).toBe(350);
+  });
+
+  it('a fare sent at the start (older app) is kept when none is sent at the end', async () => {
+    const start = await api(arif)
       .post('/jadwals', { entryType: 'amli', travel: { mode: 'bus', fare: 0 } })
       .expect(201);
+    const id = start.body.jadwal.id as string;
+    await api(arif).post(`/jadwals/${id}/visits`, { villageId: villageIds[0]! }).expect(201);
+    const done = await api(arif).post(`/jadwals/${id}/submit`, {}).expect(200);
+    expect(done.body.jadwal.totals.fare).toBe(0);
   });
 
   it('GET /jadwals/today returns the draft and the last bike meter end', async () => {
