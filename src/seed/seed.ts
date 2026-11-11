@@ -13,6 +13,7 @@ import { Setting } from '../models/setting.js';
 import { Unit } from '../models/unit.js';
 import { User } from '../models/user.js';
 import { Village } from '../models/village.js';
+import { ErpReceipt, ErpUpload } from '../models/erp-receipt.js';
 import { BCRYPT_COST } from '../modules/auth/service.js';
 import { seedHistory } from './history.js';
 import {
@@ -24,7 +25,17 @@ import {
   type SeedUser,
 } from './data.js';
 
-const ALL_MODELS = [Unit, User, Village, Jadwal, Setting, AuditLog, PasswordResetRequest] as const;
+const ALL_MODELS = [
+  Unit,
+  User,
+  Village,
+  Jadwal,
+  Setting,
+  AuditLog,
+  PasswordResetRequest,
+  ErpReceipt,
+  ErpUpload,
+] as const;
 
 /** Invented demo mobile (CLAUDE.md rule 11) so reset / forgot-password can be tried on demo users. */
 const DEMO_MOBILE = '03000000000';
@@ -105,6 +116,8 @@ export async function seedDemo({ reset = false, history = false } = {}): Promise
       Setting.deleteMany(),
       AuditLog.deleteMany(),
       PasswordResetRequest.deleteMany(),
+      ErpReceipt.deleteMany(),
+      ErpUpload.deleteMany(),
     ]);
     clearSettingsCache();
   }
