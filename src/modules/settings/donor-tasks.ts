@@ -3,7 +3,6 @@
 // document may override it (getSettings falls back to this list while it has none).
 //  - count: ticking it asks a number (toray / gattu: how many bags).
 //  - parts: ticking it asks which parts (at least one).
-//  - dayTask: also offered as the day's "other work", for a day without any Gaon.
 
 export interface DonorTaskDef {
   id: string;
@@ -12,7 +11,6 @@ export interface DonorTaskDef {
   order: number;
   count?: { labelUr: string; labelRoman: string };
   parts?: { id: string; labelUr: string; labelRoman: string }[];
-  dayTask?: boolean;
 }
 
 export const DEFAULT_DONOR_TASKS: DonorTaskDef[] = [
@@ -58,7 +56,6 @@ export const DEFAULT_DONOR_TASKS: DonorTaskDef[] = [
       { id: 'muntaqili', labelUr: 'جنس منتقلی', labelRoman: 'Jins muntaqili' },
       { id: 'farokht', labelUr: 'فروخت', labelRoman: 'Farokht' },
     ],
-    dayTask: true,
   },
   {
     id: 'janwar',
@@ -69,6 +66,28 @@ export const DEFAULT_DONOR_TASKS: DonorTaskDef[] = [
       { id: 'wusooli', labelUr: 'وصولی', labelRoman: 'Wusooli' },
       { id: 'farokht', labelUr: 'فروخت', labelRoman: 'Farokht' },
     ],
-    dayTask: true,
+  },
+].map((t, i) => ({ ...t, order: i + 1 }));
+
+/**
+ * The day's other work (CTO 12 Nov 2026): a zimmedar's day may be only Gaon, only these, or both
+ * (e.g. selling a large ushr took the whole day). Multi-select at the end of the day; seed default
+ * of settings.otherWork, same shape as the meeting tasks.
+ */
+export const DEFAULT_OTHER_WORK: DonorTaskDef[] = [
+  { id: 'ushr_muntaqili', labelUr: 'عشر منتقلی', labelRoman: 'Ushr muntaqili' },
+  { id: 'jins_muntaqili', labelUr: 'جنس منتقلی', labelRoman: 'Jins muntaqili' },
+  { id: 'ushr_farokht', labelUr: 'عشر فروخت', labelRoman: 'Ushr farokht' },
+  { id: 'jins_farokht', labelUr: 'جنس فروخت', labelRoman: 'Jins farokht' },
+  { id: 'sharai_heela', labelUr: 'شرعی حیلہ', labelRoman: 'Sharai heela' },
+  {
+    id: 'janwar',
+    labelUr: 'جانور (ڈونرز سے طے کروانا: نیت / وصولی / فروخت)',
+    labelRoman: 'Janwar (donors se tay karwana: niyyat / wusooli / farokht)',
+    parts: [
+      { id: 'niyyat', labelUr: 'نیت کروانا', labelRoman: 'Niyyat karwana' },
+      { id: 'wusooli', labelUr: 'وصولی', labelRoman: 'Wusooli' },
+      { id: 'farokht', labelUr: 'فروخت', labelRoman: 'Farokht' },
+    ],
   },
 ].map((t, i) => ({ ...t, order: i + 1 }));

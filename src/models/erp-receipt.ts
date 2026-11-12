@@ -19,9 +19,6 @@ const erpReceiptSchema = new Schema(
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     /** The zimmedar's unit when the line was uploaded — the scope of every report. */
     unitPath: { type: String, required: true },
-    /** Gaon name as the ERP writes it; villageId when it matched a Gaon of the zimmedar's District. */
-    villageName: { type: String },
-    villageId: { type: Schema.Types.ObjectId, ref: 'Village' },
     kind: { type: String, enum: ['naqd', 'jins'], required: true },
     /** Integer rupees (for jins: the value the ERP records). */
     amount: { type: Number, required: true, min: 0, validate: Number.isInteger },

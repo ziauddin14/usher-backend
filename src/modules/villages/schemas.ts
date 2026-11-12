@@ -35,3 +35,11 @@ export const duplicatesQuery = z.object({
     .regex(/^[A-Z0-9_]+$/)
     .optional(),
 });
+
+/** GET /villages/:id/donors?date=YYYY-MM-DD — the jadwal's date (default today). */
+export const donorsQuery = z.object({
+  date: z
+    .string()
+    .regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/)
+    .optional(),
+});

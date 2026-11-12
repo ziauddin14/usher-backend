@@ -22,6 +22,8 @@ import {
   villageIdParams,
 } from './schemas.js';
 import { addVillage, listVillages } from './service.js';
+import { villageDonors } from '../donors/service.js';
+import { donorsQuery } from './schemas.js';
 
 // Zimmedar: list + add. District and above: pending list, approve, merge, assign, add, correct,
 // duplicates — always inside the caller's own units (scope enforced in manage.ts).
@@ -40,6 +42,13 @@ export function villagesRouter(): Router {
   });
 
   const supervisor = requireRole(...SUPERVISOR_ROLES);
+
+  /** The Gaon's old donors and local zimmedar, for the zimmedar it is assigned to (CTO 12 Nov 2026). */
+  router.get('/:id/donors', requireRole('zimmedar'), async (req, res) => {
+    const { id } = parse(villageIdParams, req.params);
+    const { date } = parse(donorsQuery, req.query);
+    res.json(await villageDonors(currentUser(req), id, date));
+  });
 
   router.get('/pending', supervisor, async (req, res) => {
     res.json({ villages: await listPending(currentUser(req)) });

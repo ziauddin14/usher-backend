@@ -54,6 +54,11 @@ export type TaskInput = z.infer<typeof taskInput>;
 export const donorsSchema = z.object({
   oldMet: count,
   oldTasks: tasksInput.optional(),
+  /** Old donors of the Gaon's list met today (CTO 12 Nov 2026); oldMet becomes their number. */
+  met: z
+    .array(z.object({ donorId: objectId, tasks: tasksInput.optional() }))
+    .max(1000)
+    .optional(),
   newDonors: z
     .array(
       z.object({
@@ -122,7 +127,7 @@ export const submitSchema = z.object({
   meterEnd: count.max(10_000_000).optional(),
   /** Bus days: the day's fare, entered on the End screen (CTO 11 Nov 2026). */
   fare: rupees.optional(),
-  /** The day's other work (dayTask tasks); needed when the day has no Gaon (CTO 12 Nov 2026). */
+  /** The day's other work (settings.otherWork); needed when the day has no Gaon (CTO 12 Nov 2026). */
   otherTasks: tasksInput.optional(),
   note: z.string().trim().max(500).optional(),
 });

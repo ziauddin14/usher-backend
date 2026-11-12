@@ -5,7 +5,6 @@ import type { TaskInput } from './schemas.js';
 
 export type TaskReason =
   | 'UNKNOWN_TASK'
-  | 'NOT_A_DAY_TASK'
   | 'TASK_COUNT_REQUIRED'
   | 'TASK_COUNT_NOT_ALLOWED'
   | 'TASK_PARTS_REQUIRED'
@@ -17,14 +16,13 @@ const fail = (reason: TaskReason, task: string): never => {
 
 /**
  * Checked and normalized tasks, in settings order: a count task needs its number (≥ 1), a task
- * with parts needs at least one known part, and no other task carries either. `dayOnly`: only
- * tasks offered as the day's other work (dayTask).
+ * with parts needs at least one known part, and no other task carries either. `defs` is the
+ * meeting task list or the day's other-work list.
  */
-export function checkTasks(tasks: TaskInput[], defs: DonorTaskDef[], dayOnly = false): TaskInput[] {
+export function checkTasks(tasks: TaskInput[], defs: DonorTaskDef[]): TaskInput[] {
   const byId = new Map(defs.map((d) => [d.id, d]));
   const out = tasks.map((t) => {
     const def = byId.get(t.id) ?? fail('UNKNOWN_TASK', t.id);
-    if (dayOnly && !def.dayTask) fail('NOT_A_DAY_TASK', t.id);
     if (def.count && t.count === undefined) fail('TASK_COUNT_REQUIRED', t.id);
     if (!def.count && t.count !== undefined) fail('TASK_COUNT_NOT_ALLOWED', t.id);
     const partIds = (def.parts ?? []).map((p) => p.id);

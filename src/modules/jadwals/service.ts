@@ -5,12 +5,13 @@ import type { AuthUser } from '../../lib/auth.js';
 import { connectDb } from '../../lib/db.js';
 import { AppError } from '../../lib/errors.js';
 import { scopeFilter } from '../../lib/scope.js';
-import { getDonorTasks, getSettings } from '../../lib/settings.js';
+import { getDonorTasks, getOtherWork, getSettings } from '../../lib/settings.js';
 import { addDays, isDateString, karachiDate, monthOf } from '../../lib/time.js';
 import { Jadwal, type JadwalDoc } from '../../models/jadwal.js';
 import { computeDayTotals } from '../reports/calc.js';
 import { findUsableVillage } from '../villages/service.js';
 import { checkTasks } from './tasks.js';
+import { checkMetDonors, recordDonorMeetings } from '../donors/service.js';
 import type {
   atiyatSchema,
   createJadwalSchema,
@@ -277,6 +278,11 @@ export async function saveStep<S extends Step>(
     const donors = data as StepData['donors'];
     const defs = await getDonorTasks();
     if (donors.oldTasks) donors.oldTasks = checkTasks(donors.oldTasks, defs);
+    if (donors.met) {
+      await checkMetDonors(visit.villageId, doc.date, donors.met);
+      for (const m of donors.met) if (m.tasks) m.tasks = checkTasks(m.tasks, defs);
+      donors.oldMet = donors.met.length;
+    }
     for (const d of donors.newDonors) if (d.tasks) d.tasks = checkTasks(d.tasks, defs);
   }
 
@@ -337,7 +343,7 @@ export async function submitJadwal(
 ): Promise<JadwalView> {
   const doc = await ownDraft(user, id);
   if (body.otherTasks !== undefined) {
-    const other = checkTasks(body.otherTasks, await getDonorTasks(), true);
+    const other = checkTasks(body.otherTasks, await getOtherWork());
     doc.set('otherTasks', other.length > 0 ? other : undefined);
   }
   // A day may have no Gaon when it had other work instead (CTO 12 Nov 2026).
@@ -393,6 +399,8 @@ export async function submitJadwal(
     throw error;
   }
   await auditSubmit(user, doc);
+  // Old donors met get this meeting; the day's new donors join their Gaon's list (CTO 12 Nov 2026).
+  if (doc.entryType === 'amli') await recordDonorMeetings(doc);
   return serializeJadwal(doc);
 }
 

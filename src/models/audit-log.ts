@@ -24,6 +24,8 @@ export const AUDIT_ACTIONS = [
   'MOBILE_UPDATE',
   // Daily E-Raseed (ERP) receipts file uploaded at Pakistan level (CTO 11 Nov 2026).
   'ERP_UPLOAD',
+  // Shoba Ushar's donor list imported (CTO 12 Nov 2026).
+  'IMPORT_DONORS',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

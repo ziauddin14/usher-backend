@@ -6,7 +6,6 @@ import { createApp } from '../../index.js';
 import { AuditLog } from '../../models/audit-log.js';
 import { ErpReceipt, ErpUpload } from '../../models/erp-receipt.js';
 import { User } from '../../models/user.js';
-import { Village } from '../../models/village.js';
 import { seedDemo } from '../../seed/seed.js';
 
 // CTO 11 Nov 2026: the Pakistan level uploads the daily E-Raseed file; every level sees its own
@@ -18,10 +17,9 @@ let division: string; // 9030001 Sukkur
 let district: string; // 9040001 Ghotki
 let zimmedar: string; // 9090412 (Ghotki)
 let larkana: string; // district outside Ghotki
-let gaon: string; // a Gaon assigned to 9090412
 
 const HEADER =
-  'receipt_no,line_no,receipt_date,ajeer_code,gaon_name,attiyat_type,amount_rs,mad,jins_item,jins_qty,jins_unit,status';
+  'receipt_no,line_no,receipt_date,ajeer_code,attiyat_type,amount_rs,mad,jins_item,jins_qty,jins_unit,status';
 
 const upload = (cookie: string, csv: string, commit: boolean, name = 'eraseed-2026-11-10.csv') =>
   request(app)
@@ -51,9 +49,6 @@ describe('ERP receipts upload and reports', () => {
       passwordHash: await bcrypt.hash('demo1234', 4),
       mustChangePassword: false,
     });
-    const me = await User.findOne({ ajeerCode: '9090412' }).lean();
-    const v = await Village.findOne({ assignedTo: me!._id }).sort({ name: 1 }).lean();
-    gaon = v!.name;
     pakistan = await loginCookie(app, '9010001');
     division = await loginCookie(app, '9030001');
     district = await loginCookie(app, '9040001');
@@ -82,11 +77,11 @@ describe('ERP receipts upload and reports', () => {
 
   const day1 = () =>
     file([
-      `R-100,1,2026-11-10,9090412,${gaon},NAQAD,20000,Telethon,,,,ACTIVE`,
-      `R-100,2,2026-11-10,9090412/1,${gaon},NAQAD,25000,Ramzan,,,,`,
-      `R-101,1,2026-11-10,9090412,${gaon},JINS,5000,Ushr,Chawal,40,KG,`,
-      'R-102,1,2026-11-10,9090412,Koi Aur Gaon,NAQAD,1000,Telethon,,,,',
-      'R-103,1,2026-11-10,1111111,,NAQAD,500,,,,,', // nobody with this code
+      `R-100,1,2026-11-10,9090412,NAQAD,20000,Telethon,,,,ACTIVE`,
+      `R-100,2,2026-11-10,9090412/1,NAQAD,25000,Ramzan,,,,`,
+      `R-101,1,2026-11-10,9090412,JINS,5000,Ushr,Chawal,40,KG,`,
+      'R-102,1,2026-11-10,9090412,NAQAD,1000,Telethon,,,,',
+      'R-103,1,2026-11-10,1111111,NAQAD,500,,,,,', // nobody with this code
     ]);
 
   it('preview checks the file and saves nothing', async () => {
@@ -100,8 +95,6 @@ describe('ERP receipts upload and reports', () => {
       naqd: 46000,
       jins: 5000,
       zimmedaran: 1,
-      gaonMatched: 3,
-      gaonUnmatched: 1,
       dateFrom: '2026-11-10',
       dateTo: '2026-11-10',
       committed: false,
@@ -122,7 +115,6 @@ describe('ERP receipts upload and reports', () => {
       unitPath: expect.stringContaining('GHOTKI'),
       month: '2026-11',
     });
-    expect(saved!.villageId).toBeDefined();
     expect(
       await AuditLog.countDocuments({ action: 'ERP_UPLOAD', targetId: first.body.uploadId }),
     ).toBe(1);
@@ -139,7 +131,7 @@ describe('ERP receipts upload and reports', () => {
   it('a later file can cancel a line: it is updated, never deleted, and stops counting', async () => {
     const res = await upload(
       pakistan,
-      file([`R-102,1,2026-11-10,9090412,Koi Aur Gaon,NAQAD,1000,Telethon,,,,CANCELLED`]),
+      file([`R-102,1,2026-11-10,9090412,NAQAD,1000,Telethon,,,,CANCELLED`]),
       true,
     ).expect(201);
     expect(res.body).toMatchObject({ updated: 1, cancelled: 1, naqd: 0 });
@@ -150,7 +142,7 @@ describe('ERP receipts upload and reports', () => {
     const before = await ErpReceipt.countDocuments();
     const res = await upload(
       pakistan,
-      file([`R-100,1,2026-11-10,9090412,${gaon},NAQAD,20000,Telethon,,,,ACTIVE`]),
+      file([`R-100,1,2026-11-10,9090412,NAQAD,20000,Telethon,,,,ACTIVE`]),
       false,
     ).expect(200);
     expect(res.body).toMatchObject({ unchanged: 1, updated: 1 });
@@ -158,7 +150,7 @@ describe('ERP receipts upload and reports', () => {
     expect(await ErpReceipt.countDocuments({ receiptNo: 'R-100', cancelled: false })).toBe(2);
     const saved = await upload(
       pakistan,
-      file([`R-100,1,2026-11-10,9090412,${gaon},NAQAD,20000,Telethon,,,,ACTIVE`]),
+      file([`R-100,1,2026-11-10,9090412,NAQAD,20000,Telethon,,,,ACTIVE`]),
       true,
     ).expect(201);
     expect(saved.body).toMatchObject({ updated: 1 });
@@ -170,8 +162,8 @@ describe('ERP receipts upload and reports', () => {
     await upload(
       pakistan,
       file([
-        `R-100,1,2026-11-10,9090412,${gaon},NAQAD,20000,Telethon,,,,ACTIVE`,
-        `R-100,2,2026-11-10,9090412,${gaon},NAQAD,25000,Ramzan,,,,`,
+        `R-100,1,2026-11-10,9090412,NAQAD,20000,Telethon,,,,ACTIVE`,
+        `R-100,2,2026-11-10,9090412,NAQAD,25000,Ramzan,,,,`,
       ]),
       true,
     ).expect(201);
@@ -217,10 +209,10 @@ describe('ERP receipts upload and reports', () => {
     await get(zimmedar, `/dash/units/GHOTKI/erp?${q}`).expect(403);
   });
 
-  it('the zimmedar sees his own receipts by Gaon and line by line', async () => {
+  it('the zimmedar sees his own receipts by mad and line by line', async () => {
     const res = await get(zimmedar, '/me/erp?period=week&date=2026-11-10').expect(200);
     expect(res.body.totals).toMatchObject({ entries: 3, receipts: 2, naqd: 45000, jins: 5000 });
-    expect(res.body.byGaon).toEqual([{ gaon, naqd: 45000, jins: 5000 }]);
+    expect(res.body.byGaon).toBeUndefined(); // no Gaon in the ERP (CTO 12 Nov 2026)
     expect(res.body.lines).toHaveLength(3);
     expect(res.body.lines[0]).toMatchObject({ receiptNo: 'R-100', lineNo: 1, mad: 'Telethon' });
     await get(district, '/me/erp?period=day').expect(403);
