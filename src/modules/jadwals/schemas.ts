@@ -11,7 +11,8 @@ export const ENTRY_TYPES = ['amli', 'rukhsat', 'course', 'qafila', 'mashwara_ful
 
 const travelStart = z.discriminatedUnion('mode', [
   z.object({ mode: z.literal('bike'), meterStart: count.max(10_000_000) }),
-  z.object({ mode: z.literal('bus'), fare: rupees }),
+  // Bus fare is written when the day ends (CTO 11 Nov 2026); an older client may still send it here.
+  z.object({ mode: z.literal('bus'), fare: rupees.optional() }),
 ]);
 
 export const createJadwalSchema = z
@@ -105,6 +106,8 @@ export const mashwaraSchema = z
 
 export const submitSchema = z.object({
   meterEnd: count.max(10_000_000).optional(),
+  /** Bus days: the day's fare, entered on the End screen (CTO 11 Nov 2026). */
+  fare: rupees.optional(),
   note: z.string().trim().max(500).optional(),
 });
 

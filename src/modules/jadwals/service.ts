@@ -345,6 +345,17 @@ export async function submitJadwal(
     doc.set('travel.meterEnd', body.meterEnd);
     doc.set('travel.km', body.meterEnd - start);
   }
+  if (doc.travel?.mode === 'bus') {
+    // The fare is entered when the day ends (CTO 11 Nov 2026); a fare sent at the start (older
+    // client) or kept from before a reopen is used when none is sent now.
+    const fare = body.fare ?? doc.travel.fare;
+    if (fare === undefined || fare === null) {
+      throw new AppError(400, 'VALIDATION_FAILED', 'Bus fare is required', {
+        reason: 'FARE_REQUIRED',
+      });
+    }
+    doc.set('travel.fare', fare);
+  }
   if (body.note !== undefined) doc.note = body.note;
 
   doc.set('totals', computeDayTotals(doc.toObject(), await categories()));
