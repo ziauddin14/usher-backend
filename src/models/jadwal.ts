@@ -10,6 +10,20 @@ export const VISIT_STEPS = ['donors', 'atiyat', 'ijtima', 'mashwara'] as const;
 const money = { type: Number, min: 0, validate: Number.isInteger };
 const count = { type: Number, min: 0, validate: Number.isInteger };
 
+/**
+ * A ticked meeting task (settings.donorTasks, CTO 12 Nov 2026): its id, the number asked by a
+ * count task (e.g. bags), and the chosen parts of a task with parts.
+ */
+const taskSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    count: { type: Number, min: 1, validate: Number.isInteger },
+    parts: { type: [String], default: undefined },
+  },
+  { _id: false },
+);
+const tasks = { type: [taskSchema], default: undefined };
+
 const visitSchema = new Schema({
   villageId: { type: Schema.Types.ObjectId, ref: 'Village', required: true },
   villageName: { type: String, required: true },
@@ -17,12 +31,16 @@ const visitSchema = new Schema({
     type: new Schema(
       {
         oldMet: { ...count, default: 0 },
+        /** What was done with the old donors met (one list until the donor list is imported). */
+        oldTasks: tasks,
         newDonors: [
           new Schema(
             {
               name: { type: String, required: true },
               mobile: { type: String, match: /^03\d{9}$/ },
               acres: { type: Number, min: 0 },
+              /** What was done with this donor (multi-select). */
+              tasks,
             },
             { _id: false },
           ),
@@ -118,6 +136,8 @@ const jadwalSchema = new Schema(
       ),
     },
     note: { type: String, maxlength: 500 },
+    /** The day's other work (dayTask tasks), e.g. a day without any Gaon (CTO 12 Nov 2026). */
+    otherTasks: tasks,
     visits: [visitSchema],
     totals: { type: totalsSchema },
     reopened: [

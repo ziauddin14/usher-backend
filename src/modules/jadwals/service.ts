@@ -5,11 +5,12 @@ import type { AuthUser } from '../../lib/auth.js';
 import { connectDb } from '../../lib/db.js';
 import { AppError } from '../../lib/errors.js';
 import { scopeFilter } from '../../lib/scope.js';
-import { getSettings } from '../../lib/settings.js';
+import { getDonorTasks, getSettings } from '../../lib/settings.js';
 import { addDays, isDateString, karachiDate, monthOf } from '../../lib/time.js';
 import { Jadwal, type JadwalDoc } from '../../models/jadwal.js';
 import { computeDayTotals } from '../reports/calc.js';
 import { findUsableVillage } from '../villages/service.js';
+import { checkTasks } from './tasks.js';
 import type {
   atiyatSchema,
   createJadwalSchema,
@@ -41,6 +42,8 @@ export function serializeJadwal(doc: JadwalDocument) {
     submittedAt: j.submittedAt ?? null,
     travel: j.travel ?? null,
     note: j.note ?? null,
+    /** The day's other work (CTO 12 Nov 2026); [] when none. */
+    otherTasks: j.otherTasks ?? [],
     visits: j.visits.map((v) => ({
       id: String(v._id),
       villageId: String(v.villageId),
@@ -269,6 +272,14 @@ export async function saveStep<S extends Step>(
   const visit = doc.visits.id(visitId);
   if (!visit) throw new AppError(404, 'NOT_FOUND', 'Visit not found');
 
+  if (step === 'donors') {
+    // What was done with each donor (CTO 12 Nov 2026), checked against settings.donorTasks.
+    const donors = data as StepData['donors'];
+    const defs = await getDonorTasks();
+    if (donors.oldTasks) donors.oldTasks = checkTasks(donors.oldTasks, defs);
+    for (const d of donors.newDonors) if (d.tasks) d.tasks = checkTasks(d.tasks, defs);
+  }
+
   if (step === 'atiyat') {
     const atiyat = data as StepData['atiyat'];
     const known = new Set((await categories()).map((c) => c.id));
@@ -325,8 +336,13 @@ export async function submitJadwal(
   body: z.infer<typeof submitSchema>,
 ): Promise<JadwalView> {
   const doc = await ownDraft(user, id);
-  if (doc.entryType === 'amli' && doc.visits.length === 0) {
-    throw new AppError(400, 'VALIDATION_FAILED', 'Add at least one village before submitting', {
+  if (body.otherTasks !== undefined) {
+    const other = checkTasks(body.otherTasks, await getDonorTasks(), true);
+    doc.set('otherTasks', other.length > 0 ? other : undefined);
+  }
+  // A day may have no Gaon when it had other work instead (CTO 12 Nov 2026).
+  if (doc.entryType === 'amli' && doc.visits.length === 0 && !doc.otherTasks?.length) {
+    throw new AppError(400, 'VALIDATION_FAILED', 'Add a village or the other work of the day', {
       reason: 'NO_VISITS',
     });
   }

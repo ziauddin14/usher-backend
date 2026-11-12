@@ -39,8 +39,21 @@ export const visitParams = z.object({ id: objectId, visitId: objectId });
 
 export const addVisitSchema = z.object({ villageId: objectId });
 
+/** A ticked meeting task (checked against settings.donorTasks in the service). */
+const taskInput = z.object({
+  id: z.string().min(1).max(40),
+  count: z.number().int().min(1).max(100_000).optional(),
+  parts: z.array(z.string().min(1).max(40)).min(1).max(10).optional(),
+});
+export const tasksInput = z
+  .array(taskInput)
+  .max(20)
+  .refine((t) => new Set(t.map((x) => x.id)).size === t.length, 'a task is listed twice');
+export type TaskInput = z.infer<typeof taskInput>;
+
 export const donorsSchema = z.object({
   oldMet: count,
+  oldTasks: tasksInput.optional(),
   newDonors: z
     .array(
       z.object({
@@ -57,6 +70,7 @@ export const donorsSchema = z.object({
             return m ?? undefined;
           }),
         acres: z.number().min(0).max(100_000).optional(),
+        tasks: tasksInput.optional(),
       }),
     )
     .max(50),
@@ -108,6 +122,8 @@ export const submitSchema = z.object({
   meterEnd: count.max(10_000_000).optional(),
   /** Bus days: the day's fare, entered on the End screen (CTO 11 Nov 2026). */
   fare: rupees.optional(),
+  /** The day's other work (dayTask tasks); needed when the day has no Gaon (CTO 12 Nov 2026). */
+  otherTasks: tasksInput.optional(),
   note: z.string().trim().max(500).optional(),
 });
 

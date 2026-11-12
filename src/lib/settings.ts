@@ -3,6 +3,7 @@ import { connectDb } from './db.js';
 import { AppError } from './errors.js';
 import type { RewardRules } from '../modules/reports/reward.js';
 import { DEFAULT_SETTINGS } from '../modules/settings/defaults.js';
+import { DEFAULT_DONOR_TASKS, type DonorTaskDef } from '../modules/settings/donor-tasks.js';
 
 const TTL_MS = 60_000;
 
@@ -18,6 +19,16 @@ export async function getSettings(): Promise<SettingDoc> {
   }
   cache = { value: doc, at: Date.now() };
   return doc;
+}
+
+/**
+ * Meeting tasks in order (CTO 12 Nov 2026): the settings document's list, or the seed default
+ * while the document has none (a live database is never changed for this).
+ */
+export async function getDonorTasks(): Promise<DonorTaskDef[]> {
+  const list = (await getSettings()).donorTasks;
+  const tasks = list && list.length > 0 ? (list as DonorTaskDef[]) : DEFAULT_DONOR_TASKS;
+  return [...tasks].sort((a, b) => a.order - b.order);
 }
 
 export function clearSettingsCache(): void {

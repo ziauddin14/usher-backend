@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../../lib/auth.js';
-import { getSettings } from '../../lib/settings.js';
+import { getDonorTasks, getSettings } from '../../lib/settings.js';
 import { karachiDate } from '../../lib/time.js';
 
 export function metaRouter(): Router {
@@ -17,6 +17,7 @@ export function metaRouter(): Router {
       atiyatCategories: [...s.atiyatCategories].sort((a, b) => a.order - b.order),
       reward: s.reward,
       targets: s.targets,
+      donorTasks: await getDonorTasks(),
     });
   });
 

@@ -1,6 +1,8 @@
 // Seed defaults for the `settings` document (scope §3.3, §3.5, §4; data model `settings`).
 // Runtime code reads the database document via getSettings(); only the seed uses this file.
 
+import { DEFAULT_DONOR_TASKS } from './donor-tasks.js';
+
 export const DEFAULT_SETTINGS = {
   _id: 'app',
   backdateDays: 3,
@@ -63,4 +65,5 @@ export const DEFAULT_SETTINGS = {
     nearPct: 0.85,
   },
   targets: { newDonorsPerOutdoorDay: 2, ijtimaPerMonth: 1, mashwaraPerMonth: 1 },
+  donorTasks: DEFAULT_DONOR_TASKS,
 };
