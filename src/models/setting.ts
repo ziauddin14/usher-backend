@@ -27,7 +27,6 @@ const donorTaskSchema = new Schema(
       type: [new Schema({ id: { type: String, required: true }, ...labelled }, { _id: false })],
       default: undefined,
     },
-    dayTask: { type: Boolean },
   },
   { _id: false },
 );
@@ -67,6 +66,8 @@ const settingSchema = new Schema(
     },
     /** Absent in an older document: getSettings() then uses the seed default list. */
     donorTasks: { type: [donorTaskSchema], default: undefined },
+    /** The day's other work (same shape); absent → the seed default list. */
+    otherWork: { type: [donorTaskSchema], default: undefined },
   },
   { timestamps: true },
 );

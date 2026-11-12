@@ -16,9 +16,9 @@ export const MAX_ERP_ROWS = 20_000;
 export const ERP_COLUMNS = {
   receiptNo: ['receiptno', 'receiptnumber', 'raseedno', 'raseed', 'receipt'],
   lineNo: ['lineno', 'line', 'linenumber'],
-  date: ['receiptdate', 'date', 'raseeddate'],
+  // Usher management (CTO 12 Nov 2026): reports go by the E-Raseed "Initial Receipt Date".
+  date: ['initialreceiptdate', 'receiptdate', 'date', 'raseeddate'],
   ajeerCode: ['ajeercode', 'userloginid', 'ajeer', 'code'],
-  gaon: ['gaonname', 'gaon', 'village', 'villagename'],
   type: ['attiyattype', 'atiyattype', 'donationmode', 'type', 'kind'],
   amount: ['amountrs', 'amountinbasecurrency', 'amount', 'raqam'],
   mad: ['mad', 'purposename', 'category', 'head'],
@@ -60,7 +60,6 @@ export interface ErpLine {
   lineNo: number;
   date: string;
   ajeerCode: string;
-  villageName?: string;
   kind: 'naqd' | 'jins';
   amount: number;
   mad?: string;
@@ -357,7 +356,6 @@ export function checkErpRows(
       lineNo,
       date,
       ajeerCode,
-      ...(v.gaon ? { villageName: v.gaon.slice(0, 120) } : {}),
       kind,
       amount,
       ...(v.mad ? { mad: v.mad.slice(0, 80) } : {}),

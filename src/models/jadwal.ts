@@ -136,7 +136,7 @@ const jadwalSchema = new Schema(
       ),
     },
     note: { type: String, maxlength: 500 },
-    /** The day's other work (dayTask tasks), e.g. a day without any Gaon (CTO 12 Nov 2026). */
+    /** The day's other work (settings.otherWork); a day may be Gaon, other work or both (CTO 12 Nov 2026). */
     otherTasks: tasks,
     visits: [visitSchema],
     totals: { type: totalsSchema },

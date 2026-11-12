@@ -51,13 +51,20 @@ describe('meeting tasks', () => {
       id: string;
       count?: unknown;
       parts?: unknown[];
-      dayTask?: boolean;
     }[];
     expect(tasks.map((t) => t.id)).toEqual(DEFAULT_DONOR_TASKS.map((t) => t.id));
     expect(tasks).toHaveLength(10);
     expect(tasks.find((t) => t.id === 'toray')!.count).toBeTruthy();
     expect(tasks.find((t) => t.id === 'janwar')!.parts).toHaveLength(3);
-    expect(tasks.filter((t) => t.dayTask).map((t) => t.id)).toEqual(['sharai_heela', 'janwar']);
+    // The day's other work is its own list (CTO 12 Nov 2026).
+    expect((res.body.otherWork as { id: string }[]).map((t) => t.id)).toEqual([
+      'ushr_muntaqili',
+      'jins_muntaqili',
+      'ushr_farokht',
+      'jins_farokht',
+      'sharai_heela',
+      'janwar',
+    ]);
   });
 
   it('a settings document without a task list uses the default list', async () => {
@@ -130,17 +137,17 @@ describe('meeting tasks', () => {
       meterEnd: 1010,
       otherTasks: [{ id: 'deeni_dawat' }],
     }).expect(400);
-    expect(notDay.body.error.details.reason).toBe('NOT_A_DAY_TASK');
+    expect(notDay.body.error.details.reason).toBe('UNKNOWN_TASK'); // a meeting task, not other work
     await post(`/jadwals/${id}/submit`, { meterEnd: 1010, otherTasks: [] }).expect(400);
 
     const done = await post(`/jadwals/${id}/submit`, {
       meterEnd: 1010,
-      otherTasks: [{ id: 'sharai_heela', parts: ['muntaqili'] }],
+      otherTasks: [{ id: 'janwar', parts: ['farokht'] }, { id: 'ushr_farokht' }],
     }).expect(200);
     expect(done.body.jadwal).toMatchObject({
       status: 'submitted',
       visits: [],
-      otherTasks: [{ id: 'sharai_heela', parts: ['muntaqili'] }],
+      otherTasks: [{ id: 'ushr_farokht' }, { id: 'janwar', parts: ['farokht'] }],
       totals: { villages: 0, km: 10 },
     });
   });
@@ -150,5 +157,18 @@ describe('meeting tasks', () => {
     await post(`/jadwals/${id}/visits`, { villageId }).expect(201);
     const done = await post(`/jadwals/${id}/submit`, { meterEnd: 1005 }).expect(200);
     expect(done.body.jadwal.otherTasks).toEqual([]);
+
+    await Jadwal.deleteMany({});
+    const both = await bikeDay();
+    await post(`/jadwals/${both}/visits`, { villageId }).expect(201);
+    const mixed = await post(`/jadwals/${both}/submit`, {
+      meterEnd: 1005,
+      otherTasks: [{ id: 'jins_muntaqili' }, { id: 'ushr_muntaqili' }],
+    }).expect(200);
+    expect(mixed.body.jadwal.otherTasks).toEqual([
+      { id: 'ushr_muntaqili' },
+      { id: 'jins_muntaqili' },
+    ]);
+    expect(mixed.body.jadwal.totals.villages).toBe(1);
   });
 });

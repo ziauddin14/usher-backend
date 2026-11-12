@@ -5,7 +5,7 @@ import type { AuthUser } from '../../lib/auth.js';
 import { connectDb } from '../../lib/db.js';
 import { AppError } from '../../lib/errors.js';
 import { scopeFilter } from '../../lib/scope.js';
-import { getDonorTasks, getSettings } from '../../lib/settings.js';
+import { getDonorTasks, getOtherWork, getSettings } from '../../lib/settings.js';
 import { addDays, isDateString, karachiDate, monthOf } from '../../lib/time.js';
 import { Jadwal, type JadwalDoc } from '../../models/jadwal.js';
 import { computeDayTotals } from '../reports/calc.js';
@@ -337,7 +337,7 @@ export async function submitJadwal(
 ): Promise<JadwalView> {
   const doc = await ownDraft(user, id);
   if (body.otherTasks !== undefined) {
-    const other = checkTasks(body.otherTasks, await getDonorTasks(), true);
+    const other = checkTasks(body.otherTasks, await getOtherWork());
     doc.set('otherTasks', other.length > 0 ? other : undefined);
   }
   // A day may have no Gaon when it had other work instead (CTO 12 Nov 2026).

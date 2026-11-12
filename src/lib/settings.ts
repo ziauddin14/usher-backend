@@ -3,7 +3,11 @@ import { connectDb } from './db.js';
 import { AppError } from './errors.js';
 import type { RewardRules } from '../modules/reports/reward.js';
 import { DEFAULT_SETTINGS } from '../modules/settings/defaults.js';
-import { DEFAULT_DONOR_TASKS, type DonorTaskDef } from '../modules/settings/donor-tasks.js';
+import {
+  DEFAULT_DONOR_TASKS,
+  DEFAULT_OTHER_WORK,
+  type DonorTaskDef,
+} from '../modules/settings/donor-tasks.js';
 
 const TTL_MS = 60_000;
 
@@ -26,8 +30,16 @@ export async function getSettings(): Promise<SettingDoc> {
  * while the document has none (a live database is never changed for this).
  */
 export async function getDonorTasks(): Promise<DonorTaskDef[]> {
-  const list = (await getSettings()).donorTasks;
-  const tasks = list && list.length > 0 ? (list as DonorTaskDef[]) : DEFAULT_DONOR_TASKS;
+  return ordered((await getSettings()).donorTasks, DEFAULT_DONOR_TASKS);
+}
+
+/** The day's other work in order (settings.otherWork, or the seed default while it has none). */
+export async function getOtherWork(): Promise<DonorTaskDef[]> {
+  return ordered((await getSettings()).otherWork, DEFAULT_OTHER_WORK);
+}
+
+function ordered(list: unknown[] | null | undefined, fallback: DonorTaskDef[]): DonorTaskDef[] {
+  const tasks = list && list.length > 0 ? (list as DonorTaskDef[]) : fallback;
   return [...tasks].sort((a, b) => a.order - b.order);
 }
 

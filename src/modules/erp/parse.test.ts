@@ -70,7 +70,8 @@ describe('ERP file reading (CTO 11 Nov 2026)', () => {
       row: 2,
       receiptNo: 'KHI-USH-ER-1',
       lineNo: 1,
-      date: '2026-11-09',
+      // The Initial Receipt Date, not the Receipt Date (Usher management, 12 Nov 2026).
+      date: '2026-11-01',
       ajeerCode: '1234567',
       kind: 'naqd',
       amount: 20000,

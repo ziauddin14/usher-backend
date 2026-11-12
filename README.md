@@ -209,7 +209,8 @@ sent at the start by an older app, or kept from before a reopen, is used when no
 ## ERP (E-Raseed) receipts upload (CTO 11 Nov 2026)
 
 The Pakistan level uploads the ERP's daily receipts file; every dashboard (own scope) and every
-zimmedar then sees the receipts by zimmedar, Gaon and mad. The zimmedar keeps typing only his
+zimmedar then sees the receipts by zimmedar and mad (no Gaon — Finance allows no Gaon field in the ERP,
+CTO 12 Nov 2026). The zimmedar keeps typing only his
 day's total in the jadwal; the ERP brings the details. The reward is **not** changed by this.
 
 - `POST /erp/uploads?name=<file>&commit=false|true` (role `pakistan`), body = the file bytes (CSV
@@ -222,7 +223,7 @@ day's total in the jadwal; the ERP brings the details. The reward is **not** cha
   invented sample rows, for the ERP / Finance team).
 - Reports: `GET /dash/units/:code/erp?period=…` (totals, by mad, one row per child unit or, for a
   District / Tehsil, per zimmedar — 0 when the ERP has nothing for him) and `GET /me/erp?period=…`
-  (own totals, by Gaon, by mad, lines). Same periods and date range as the other reports.
+  (own totals, by mad, lines). Same periods and date range as the other reports.
 - Collections `erpReceipts` (unique `receiptNo + lineNo`; indexes `unitPath + date`,
   `userId + date`) and `erpUploads`. A line is filed under the zimmedar's unit when first saved.
 
@@ -235,7 +236,6 @@ case, spaces or `_`):
 | `line_no` | no (1) | when one receipt has several lines (mad / material) |
 | `receipt_date` | yes | `YYYY-MM-DD` or day-first `DD/MM/YYYY`; not after today |
 | `ajeer_code` | yes | the zimmedar; `12345/2` counts as `12345` (login code). Unknown code = row error |
-| `gaon_name` | no | linked to a Gaon of the zimmedar's District when the name matches one Gaon |
 | `attiyat_type` | yes | `NAQAD` (cash) or `JINS` (material) |
 | `amount_rs` | yes | whole rupees (`5,000` and `5000.00` accepted); NAQAD > 0; JINS = its value |
 | `mad` | no | as the ERP names it (not mapped to the app's atiyat categories) |
@@ -253,18 +253,18 @@ mobiles and the other ~78 columns never leave the computer; a month of cash went
 | E-Raseed column | Read as |
 |---|---|
 | `Receipt Number` | receipt; its rows are lines 1, 2, … in file order (no line column in the export) |
-| `Receipt Date` | the date of the receipt (`Initial Receipt Date` is not used — open question) |
+| `Initial Receipt Date` | the date of the receipt in every report (Usher management, 12 Nov 2026); `Receipt Date` only when there is no Initial Receipt Date column |
 | `User Login ID` | `ush` + Ajeer Code (any letter case); other IDs (e.g. `ush` + 11 digits) = row error |
 | `Donation Mode` | `Cash` → naqad, `Material` → jins |
 | `Amount In Base Currency` | rupees, rounded to the nearest rupee (some values carry float noise) |
 | `Purpose Name` | mad (e.g. "Telethon Dawat-e-islami 2025") |
 | `Fund Category` | kept (Wajiba / Nafila) |
-| `Deposit / Undeposit` | kept (cash only); every active receipt counts for now — open question |
+| `Deposit / Undeposit` | kept (cash only) but ignored: every active receipt counts as wusooli, deposited or not (Usher management, 12 Nov 2026). `Final Batch` is ignored too |
 | `Material Item`, `Weight / QTY`, `Unit` | jins item, quantity, unit |
 | `Active / Cancel` | `CANCEL` lines never count |
 
-`\N` (the export's empty value) is read as empty. The export has **no Gaon column**: those lines
-have no Gaon. When a later file has fewer lines for a receipt, the missing saved lines are
+`\N` (the export's empty value) is read as empty. There is **no Gaon** in the ERP and no
+Gaon breakdown (a `gaon_name` column, if present, is ignored). When a later file has fewer lines for a receipt, the missing saved lines are
 cancelled (never deleted).
 
 ## Meeting tasks and a day without Gaon (CTO 12 Nov 2026)
@@ -272,12 +272,15 @@ cancelled (never deleted).
 - `settings.donorTasks` — the ten meeting tasks from Usher management (multi-select), seed default in
   `src/modules/settings/donor-tasks.ts`: `count` = ask a number (toray / gattu: bags), `parts` = ask
   which part (sharai heela / jins muntaqili / farokht; janwar: niyyat / wusooli / farokht),
-  `dayTask` = also offered as the day's other work. A settings document without the list (the live
-  one) uses the default — the live database is not changed for this. `GET /meta` → `donorTasks`.
+  A settings document without the list (the live one) uses the default — the live database is not
+  changed for this. `GET /meta` → `donorTasks`.
+- `settings.otherWork` — the day's other work, its own list (CTO 12 Nov 2026): ushr muntaqili, jins
+  muntaqili, ushr farokht, jins farokht, sharai heela, janwar (parts: niyyat / wusooli / farokht).
+  A day may be only Gaon, only other work, or both. `GET /meta` → `otherWork`.
 - `PUT …/visits/:visitId/donors` takes `tasks` on each new donor and `oldTasks` for the old donors
   met (one list until the donor list is imported). Checked by `checkTasks` (`jadwals/tasks.ts`):
   `UNKNOWN_TASK`, `TASK_COUNT_REQUIRED`, `TASK_COUNT_NOT_ALLOWED`, `TASK_PARTS_REQUIRED`,
   `TASK_PART_UNKNOWN`; stored in settings order.
-- `POST /jadwals/:id/submit` takes `otherTasks` (dayTask tasks only, else `NOT_A_DAY_TASK`). An amli
+- `POST /jadwals/:id/submit` takes `otherTasks` (from `otherWork`, else `UNKNOWN_TASK`). An amli
   day may now have no Gaon when it has other work; with neither → `NO_VISITS` as before.
 - Not in reports yet (totals unchanged) — counts per task can be added when the reports are defined.

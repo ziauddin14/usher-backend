@@ -1,19 +1,18 @@
 // E-Raseed (ERP) receipts (CTO 11 Nov 2026): the Pakistan level uploads the ERP's daily file;
-// every level then sees what each zimmedar's receipts brought in, by Gaon and by mad. The ERP is
-// the source of truth for these details — nothing here is typed by a zimmedar.
+// every level then sees what each zimmedar's receipts brought in, by mad. The ERP is the source of
+// truth for these details — nothing here is typed by a zimmedar. No Gaon: Finance does not allow a
+// Gaon field in the ERP, so there is no Gaon breakdown (CTO 12 Nov 2026).
 import { Types } from 'mongoose';
 import type { AuthUser } from '../../lib/auth.js';
 import { audit } from '../../lib/audit.js';
 import { connectDb } from '../../lib/db.js';
 import { AppError } from '../../lib/errors.js';
-import { districtPathOf, escapeRegex } from '../../lib/scope.js';
+import { escapeRegex } from '../../lib/scope.js';
 import { getRewardRules, getSettings } from '../../lib/settings.js';
-import { villageNameKey } from '../../lib/text.js';
 import { karachiDate } from '../../lib/time.js';
 import { ErpReceipt, ErpUpload } from '../../models/erp-receipt.js';
 import { Unit, type UnitLevel } from '../../models/unit.js';
 import { User } from '../../models/user.js';
-import { Village } from '../../models/village.js';
 import { unitInScope } from '../dash/service.js';
 import type { SummaryPeriod } from '../me/schemas.js';
 import { periodRange } from '../me/service.js';
@@ -32,7 +31,6 @@ const MAX_ERRORS_SHOWN = 500;
 interface Resolved extends ErpLine {
   userId: Types.ObjectId;
   unitPath: string;
-  villageId?: Types.ObjectId;
 }
 
 type Change = 'added' | 'updated' | 'unchanged';
@@ -40,7 +38,6 @@ type Change = 'added' | 'updated' | 'unchanged';
 const COMPARED = [
   'date',
   'ajeerCode',
-  'villageName',
   'kind',
   'amount',
   'mad',
@@ -53,34 +50,6 @@ const COMPARED = [
 ] as const;
 
 const same = (a: unknown, b: unknown) => (a ?? null) === (b ?? null);
-
-/**
- * Gaon of each line: a Gaon of the zimmedar's own District with the same name key, the one
- * assigned to him first; none when the name is missing, unknown or ambiguous (the line still
- * counts for the zimmedar — only the Gaon link is left out).
- */
-async function matchVillages(lines: Resolved[]): Promise<void> {
-  const keys = [
-    ...new Set(lines.flatMap((l) => (l.villageName ? [villageNameKey(l.villageName)] : []))),
-  ];
-  if (keys.length === 0) return;
-  const villages = await Village.find({ nameKey: { $in: keys }, status: { $ne: 'merged' } })
-    .select('_id nameKey unitPath assignedTo')
-    .lean();
-  const byKey = new Map<string, typeof villages>();
-  for (const v of villages) byKey.set(v.nameKey, [...(byKey.get(v.nameKey) ?? []), v]);
-  for (const line of lines) {
-    if (!line.villageName) continue;
-    const district = districtPathOf(line.unitPath);
-    if (!district) continue;
-    const inDistrict = (byKey.get(villageNameKey(line.villageName)) ?? []).filter(
-      (v) => v.unitPath === district || v.unitPath.startsWith(`${district}/`),
-    );
-    const own = inDistrict.filter((v) => v.assignedTo && v.assignedTo.equals(line.userId));
-    const pick = own.length === 1 ? own[0] : inDistrict.length === 1 ? inDistrict[0] : undefined;
-    if (pick) line.villageId = pick._id;
-  }
-}
 
 function fileError(error: unknown): never {
   if (error instanceof ErpFileError) {
@@ -124,21 +93,17 @@ export async function erpUpload(
     if (!user) errors.push({ row: line.row, reason: 'AJEER_CODE_UNKNOWN' });
     else lines.push({ ...line, userId: user._id, unitPath: user.unitPath });
   }
-  await matchVillages(lines);
 
   const existing = await ErpReceipt.find({
     receiptNo: { $in: [...new Set(lines.map((l) => l.receiptNo))] },
   })
-    .select('receiptNo lineNo userId unitPath villageId ' + COMPARED.join(' '))
+    .select('receiptNo lineNo userId unitPath ' + COMPARED.join(' '))
     .lean();
   const existingBy = new Map(existing.map((e) => [`${e.receiptNo}\u0000${e.lineNo}`, e]));
   const changes = lines.map((l): { line: Resolved; change: Change; keepPath?: string } => {
     const old = existingBy.get(`${l.receiptNo}\u0000${l.lineNo}`);
     if (!old) return { line: l, change: 'added' };
-    const differs =
-      COMPARED.some((k) => !same(old[k], l[k])) ||
-      !old.userId.equals(l.userId) ||
-      String(old.villageId ?? '') !== String(l.villageId ?? '');
+    const differs = COMPARED.some((k) => !same(old[k], l[k])) || !old.userId.equals(l.userId);
     // A line keeps the unit it was first saved under while it stays with the same zimmedar.
     const keepPath = old.userId.equals(l.userId) ? old.unitPath : undefined;
     return {
@@ -177,8 +142,6 @@ export async function erpUpload(
     naqd: active.filter((l) => l.kind === 'naqd').reduce((s, l) => s + l.amount, 0),
     jins: active.filter((l) => l.kind === 'jins').reduce((s, l) => s + l.amount, 0),
     zimmedaran: new Set(lines.map((l) => l.ajeerCode)).size,
-    gaonMatched: lines.filter((l) => l.villageId).length,
-    gaonUnmatched: lines.filter((l) => !l.villageId).length,
     dateFrom: dates[0] ?? null,
     dateTo: dates.at(-1) ?? null,
     errorsByReason: byReason,
@@ -215,16 +178,7 @@ export async function erpUpload(
         uploadId: upload._id,
       };
       const unset: Record<string, ''> = {};
-      for (const k of [
-        'villageName',
-        'villageId',
-        'mad',
-        'item',
-        'qty',
-        'qtyUnit',
-        'fund',
-        'deposited',
-      ] as const) {
+      for (const k of ['mad', 'item', 'qty', 'qtyUnit', 'fund', 'deposited'] as const) {
         if (doc[k] === undefined) {
           delete doc[k];
           unset[k] = '';
@@ -449,7 +403,7 @@ export async function unitErp(
 /** Receipt lines listed on a zimmedar's own screen (newest first). */
 const MAX_OWN_LINES = 300;
 
-/** GET /me/erp — the zimmedar's own ERP receipts in a period: totals, by mad, by Gaon, lines. */
+/** GET /me/erp — the zimmedar's own ERP receipts in a period: totals, by mad, lines. */
 export async function myErp(
   user: AuthUser,
   q: { period: SummaryPeriod; date?: string | undefined; from?: string | undefined },
@@ -463,7 +417,7 @@ export async function myErp(
   };
   const [lines, mads, last] = await Promise.all([
     ErpReceipt.find(match)
-      .select('receiptNo lineNo date villageName kind amount mad item qty qtyUnit')
+      .select('receiptNo lineNo date kind amount mad item qty qtyUnit')
       .sort({ date: -1, receiptNo: 1, lineNo: 1 })
       .lean(),
     byMad(match),
@@ -472,24 +426,16 @@ export async function myErp(
   const totals = emptySums();
   totals.entries = lines.length;
   totals.receipts = new Set(lines.map((l) => l.receiptNo)).size;
-  const gaon = new Map<string, { gaon: string | null; naqd: number; jins: number }>();
   for (const l of lines) {
     if (l.kind === 'naqd') totals.naqd += l.amount;
     else totals.jins += l.amount;
-    const key = l.villageName ?? '';
-    const g = gaon.get(key) ?? { gaon: l.villageName ?? null, naqd: 0, jins: 0 };
-    if (l.kind === 'naqd') g.naqd += l.amount;
-    else g.jins += l.amount;
-    gaon.set(key, g);
   }
   return {
     ...span,
     totals,
     byMad: mads,
-    byGaon: [...gaon.values()].sort((a, b) => b.naqd + b.jins - (a.naqd + a.jins)),
     lines: lines.slice(0, MAX_OWN_LINES).map(({ _id, ...l }) => ({
       ...l,
-      villageName: l.villageName ?? null,
       mad: l.mad ?? null,
       item: l.item ?? null,
       qty: l.qty ?? null,
@@ -502,9 +448,9 @@ export async function myErp(
 
 /** The format sample for the ERP / Finance team (invented values). */
 export const ERP_TEMPLATE_CSV = [
-  'receipt_no,line_no,receipt_date,ajeer_code,gaon_name,attiyat_type,amount_rs,mad,jins_item,jins_qty,jins_unit,status,suba,division,district,tehsil',
-  'ER-2026-000101,1,2026-11-11,1234567,Basti Misali,NAQAD,20000,Telethon,,,,ACTIVE,Sindh,Sukkur,Ghotki,Mirpur Mathelo',
-  'ER-2026-000101,2,2026-11-11,1234567,Basti Misali,NAQAD,25000,Ramzan Atiyat,,,,ACTIVE,Sindh,Sukkur,Ghotki,Mirpur Mathelo',
-  'ER-2026-000102,1,2026-11-11,1234567,Basti Misali,JINS,5000,Ushr,Chawal,40,KG,ACTIVE,Sindh,Sukkur,Ghotki,Mirpur Mathelo',
-  'ER-2026-000099,1,2026-11-10,1234567,Goth Namoona,NAQAD,1500,Mahana Atiyat,,,,CANCELLED,Sindh,Sukkur,Ghotki,Mirpur Mathelo',
+  'receipt_no,line_no,receipt_date,ajeer_code,attiyat_type,amount_rs,mad,jins_item,jins_qty,jins_unit,status,suba,division,district,tehsil',
+  'ER-2026-000101,1,2026-11-11,1234567,NAQAD,20000,Telethon,,,,ACTIVE,Sindh,Sukkur,Ghotki,Mirpur Mathelo',
+  'ER-2026-000101,2,2026-11-11,1234567,NAQAD,25000,Ramzan Atiyat,,,,ACTIVE,Sindh,Sukkur,Ghotki,Mirpur Mathelo',
+  'ER-2026-000102,1,2026-11-11,1234567,JINS,5000,Ushr,Chawal,40,KG,ACTIVE,Sindh,Sukkur,Ghotki,Mirpur Mathelo',
+  'ER-2026-000099,1,2026-11-10,1234567,NAQAD,1500,Mahana Atiyat,,,,CANCELLED,Sindh,Sukkur,Ghotki,Mirpur Mathelo',
 ].join('\r\n');
