@@ -33,6 +33,16 @@ const visitSchema = new Schema({
         oldMet: { ...count, default: 0 },
         /** What was done with the old donors met (one list until the donor list is imported). */
         oldTasks: tasks,
+        /** Old donors of the Gaon's list met today, with what was done (CTO 12 Nov 2026). */
+        met: {
+          type: [
+            new Schema(
+              { donorId: { type: Schema.Types.ObjectId, ref: 'Donor', required: true }, tasks },
+              { _id: false },
+            ),
+          ],
+          default: undefined,
+        },
         newDonors: [
           new Schema(
             {

@@ -14,6 +14,7 @@ import { Unit } from '../models/unit.js';
 import { User } from '../models/user.js';
 import { Village } from '../models/village.js';
 import { ErpReceipt, ErpUpload } from '../models/erp-receipt.js';
+import { Donor } from '../models/donor.js';
 import { BCRYPT_COST } from '../modules/auth/service.js';
 import { seedHistory } from './history.js';
 import {
@@ -35,7 +36,53 @@ const ALL_MODELS = [
   PasswordResetRequest,
   ErpReceipt,
   ErpUpload,
+  Donor,
 ] as const;
+
+/**
+ * Invented old donors and a local zimmedar for the demo zimmedar's first two Gaon (CTO 12 Nov 2026),
+ * so the donor list can be tried. Idempotent (upsert by Gaon + mobile).
+ */
+async function seedDemoDonors(): Promise<void> {
+  const demo = await User.findOne({ ajeerCode: '9090412' }).select('_id').lean();
+  if (!demo) return;
+  const villages = await Village.find({ assignedTo: demo._id, status: 'approved' })
+    .sort({ nameKey: 1 })
+    .limit(2)
+    .lean();
+  const now = new Date();
+  const ops = villages.flatMap((v, vi) =>
+    [1, 2, 3].map((n) => {
+      const name = `نمونہ ڈونر ${vi * 3 + n}`;
+      const mobile = `0300000${String(1000 + vi * 10 + n)}`;
+      return {
+        updateOne: {
+          filter: { villageId: v._id, mobile },
+          update: {
+            $setOnInsert: {
+              villageId: v._id,
+              unitPath: v.unitPath,
+              name,
+              nameKey: villageNameKey(name),
+              mobile,
+              acres: 5 * n,
+              addedOn: '2026-01-01',
+              source: { kind: 'import' as const, file: 'demo', at: now },
+              meetings: 0,
+              isActive: true,
+            },
+          },
+          upsert: true,
+        },
+      };
+    }),
+  );
+  if (ops.length) await Donor.bulkWrite(ops);
+  await Village.updateMany(
+    { _id: { $in: villages.map((v) => v._id) } },
+    { $set: { localZimmedar: { name: 'نمونہ گاؤں ذمہ دار', mobile: DEMO_MOBILE } } },
+  );
+}
 
 /** Invented demo mobile (CLAUDE.md rule 11) so reset / forgot-password can be tried on demo users. */
 const DEMO_MOBILE = '03000000000';
@@ -118,6 +165,7 @@ export async function seedDemo({ reset = false, history = false } = {}): Promise
       PasswordResetRequest.deleteMany(),
       ErpReceipt.deleteMany(),
       ErpUpload.deleteMany(),
+      Donor.deleteMany(),
     ]);
     clearSettingsCache();
   }
@@ -190,6 +238,7 @@ export async function seedDemo({ reset = false, history = false } = {}): Promise
   );
   await Village.bulkWrite(villageOps);
   await assignSeedVillages();
+  await seedDemoDonors();
 
   const { jadwals } = history ? await seedHistory() : { jadwals: 0 };
 

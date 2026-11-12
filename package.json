@@ -20,6 +20,7 @@
     "backup": "tsx --env-file-if-exists=.env scripts/backup.ts",
     "import:employees": "tsx --env-file-if-exists=.env scripts/import-employees.ts",
     "import:villages": "tsx --env-file-if-exists=.env scripts/import-villages.ts",
+    "import:donors": "tsx --env-file-if-exists=.env scripts/import-donors.ts",
     "import:mobiles": "tsx --env-file-if-exists=.env scripts/import-mobiles.ts",
     "inspect:file": "tsx scripts/inspect-import-file.ts",
     "provision:pakistan-admin": "tsx --env-file-if-exists=.env scripts/provision-pakistan-admin.ts",

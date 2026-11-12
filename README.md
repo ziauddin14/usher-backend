@@ -284,3 +284,25 @@ cancelled (never deleted).
 - `POST /jadwals/:id/submit` takes `otherTasks` (from `otherWork`, else `UNKNOWN_TASK`). An amli
   day may now have no Gaon when it has other work; with neither → `NO_VISITS` as before.
 - Not in reports yet (totals unchanged) — counts per task can be added when the reports are defined.
+
+## Donors of a Gaon (CTO 12 Nov 2026)
+
+- **Import:** `pnpm import:donors "private/<donor list>.csv" --dry-run`, then
+  `--operator "<who>" --confirm=ushr_live`. Run after the employee and Gaon imports. Columns: Mulk,
+  Soba, Division, District, Tehsil, ID, User Name, گاؤں کا نام, گاؤں ذمہ دار کا نام / نمبر, نام ڈونر,
+  ڈونر موبائل نمبر, زیر کاشت رقبہ(ایکڑ). District from the District column (or, when it does not map,
+  the ID's District); the Gaon by name inside that District (former names too; a loose spelling match
+  only when it is the only one). Gaon not found → report (`private/donor-import-report-*.xlsx`), imported
+  later by running the same file again. One donor per mobile per Gaon (without a mobile: per name);
+  nothing is doubled. The Gaon's local zimmedar (name, mobile) is saved on the Gaon. Audited
+  (`IMPORT_DONORS`). Terminal output: counts only.
+- **A donor belongs to its Gaon:** whoever has the Gaon assigned sees its donors.
+  `GET /villages/:id/donors?date=` (zimmedar of that Gaon) → the Gaon's local zimmedar and its old
+  donors: every imported donor, and a donor a zimmedar added on an earlier day; `isNew` = added by a
+  zimmedar and not met since; `lastMet` = date and tasks of the latest meeting.
+- **Meeting:** `PUT …/donors` takes `met: [{ donorId, tasks? }]` (old donors of that Gaon only, else
+  `DONOR_NOT_IN_VILLAGE` / `DONOR_TWICE`); `oldMet` becomes their number. On submit each met donor
+  gets this meeting (a back-dated day never replaces a later last meeting) and each new donor of the
+  day joins its Gaon's list from the next day (`source.kind: zimmedar`).
+- Collection `donors` (unique Gaon + mobile; Gaon + name key; unitPath). The demo seed adds invented
+  donors and a local zimmedar to 9090412's first two Gaon.

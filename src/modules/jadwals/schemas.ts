@@ -54,6 +54,11 @@ export type TaskInput = z.infer<typeof taskInput>;
 export const donorsSchema = z.object({
   oldMet: count,
   oldTasks: tasksInput.optional(),
+  /** Old donors of the Gaon's list met today (CTO 12 Nov 2026); oldMet becomes their number. */
+  met: z
+    .array(z.object({ donorId: objectId, tasks: tasksInput.optional() }))
+    .max(1000)
+    .optional(),
   newDonors: z
     .array(
       z.object({

@@ -11,6 +11,7 @@ import { Jadwal, type JadwalDoc } from '../../models/jadwal.js';
 import { computeDayTotals } from '../reports/calc.js';
 import { findUsableVillage } from '../villages/service.js';
 import { checkTasks } from './tasks.js';
+import { checkMetDonors, recordDonorMeetings } from '../donors/service.js';
 import type {
   atiyatSchema,
   createJadwalSchema,
@@ -277,6 +278,11 @@ export async function saveStep<S extends Step>(
     const donors = data as StepData['donors'];
     const defs = await getDonorTasks();
     if (donors.oldTasks) donors.oldTasks = checkTasks(donors.oldTasks, defs);
+    if (donors.met) {
+      await checkMetDonors(visit.villageId, doc.date, donors.met);
+      for (const m of donors.met) if (m.tasks) m.tasks = checkTasks(m.tasks, defs);
+      donors.oldMet = donors.met.length;
+    }
     for (const d of donors.newDonors) if (d.tasks) d.tasks = checkTasks(d.tasks, defs);
   }
 
@@ -393,6 +399,8 @@ export async function submitJadwal(
     throw error;
   }
   await auditSubmit(user, doc);
+  // Old donors met get this meeting; the day's new donors join their Gaon's list (CTO 12 Nov 2026).
+  if (doc.entryType === 'amli') await recordDonorMeetings(doc);
   return serializeJadwal(doc);
 }
 

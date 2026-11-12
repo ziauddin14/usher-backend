@@ -14,6 +14,10 @@ const villageSchema = new Schema(
     mergedInto: { type: Schema.Types.ObjectId, ref: 'Village' },
     /** The Ushar Zimmedar responsible for this village (from the village list import, or the adder). */
     assignedTo: { type: Schema.Types.ObjectId, ref: 'User' },
+    /** The Gaon's local zimmedar (name, mobile) from Shoba Ushar's donor list (CTO 12 Nov 2026). */
+    localZimmedar: {
+      type: new Schema({ name: { type: String }, mobile: { type: String } }, { _id: false }),
+    },
     addedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     approvedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     approvedAt: { type: Date },
