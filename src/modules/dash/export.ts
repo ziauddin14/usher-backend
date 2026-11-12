@@ -5,10 +5,12 @@ import type { AuthUser } from '../../lib/auth.js';
 import { AppError } from '../../lib/errors.js';
 import type { Kpis } from '../me/service.js';
 import type { DashPeriod } from './schemas.js';
+import { addTaskSheet, type TaskCounts } from '../reports/tasks.js';
 import {
   childrenTable,
   percent,
   type TodayStatus,
+  unitTasks,
   zimmedarDays,
   zimmedaranTable,
 } from './service.js';
@@ -28,7 +30,13 @@ const DUTY_TEXT = { approved: 'Duty manzoor', rejected: 'Duty mustarad' } as con
 
 type Cell = string | number | null;
 
-async function workbook(title: string, header: string[], rows: Cell[][], totals: Cell[]) {
+async function workbook(
+  title: string,
+  header: string[],
+  rows: Cell[][],
+  totals: Cell[],
+  tasks?: TaskCounts,
+) {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Report', { views: [{ state: 'frozen', ySplit: 2 }] });
   ws.addRow([title]).font = { bold: true, size: 13 };
@@ -41,6 +49,7 @@ async function workbook(title: string, header: string[], rows: Cell[][], totals:
     c.width = i === 0 ? 26 : 14;
     c.numFmt = '#,##0';
   });
+  if (tasks) addTaskSheet(wb, tasks);
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
@@ -175,6 +184,7 @@ export async function dashExport(
         '',
         '',
       ],
+      await unitTasks(caller, q.code, q.period, q.date, q.from),
     );
     return { file, name: `UsherDesk-${t.unit.code}-${t.period}-${span(t)}.xlsx` };
   }
@@ -222,6 +232,7 @@ export async function dashExport(
       sum(c.rows, 'rewardWusooli'),
       ...tiers.map((_, i) => c.rows.reduce((s, r) => s + (r.onTrack[i]?.count ?? 0), 0)),
     ],
+    await unitTasks(caller, q.code, q.period, q.date, q.from),
   );
   return { file, name: `UsherDesk-${c.unit.code}-${c.period}-${span(c)}.xlsx` };
 }

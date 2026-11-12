@@ -14,6 +14,7 @@ import { User } from '../../models/user.js';
 import { Village } from '../../models/village.js';
 import { KPI_KEYS, type Kpis, periodRange } from '../me/service.js';
 import { periodFor, type RewardRules, rewardStatus } from '../reports/reward.js';
+import { taskCounts } from '../reports/tasks.js';
 import type { DashPeriod } from './schemas.js';
 
 const LEVEL_ORDER: UnitLevel[] = ['pakistan', 'suba', 'division', 'district', 'tehsil'];
@@ -460,4 +461,27 @@ export async function unitVillages(caller: AuthUser, code: string, month?: strin
       .filter((v) => v.assignedTo && !users.some((u) => String(u._id) === String(v.assignedTo)))
       .map(item),
   };
+}
+
+/** GET /dash/units/:code/tasks — task counts of the unit's submitted days (CTO 13 Nov 2026). */
+export async function unitTasks(
+  caller: AuthUser,
+  code: string,
+  period: DashPeriod,
+  date?: string,
+  rangeFrom?: string,
+) {
+  const unit = await unitInScope(caller, code);
+  const settings = await getSettings();
+  const today = karachiDate();
+  const day = date && date < today ? date : today;
+  const { from, to } = periodRange(
+    period,
+    day,
+    today,
+    settings.weekStartsOn,
+    await getRewardRules(),
+    rangeFrom,
+  );
+  return { unit, from, to, ...(await taskCounts({ unitPath: pathRegex(unit.path), from, to })) };
 }

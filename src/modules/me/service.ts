@@ -16,6 +16,7 @@ import {
   type RewardRules,
   rewardStatus,
 } from '../reports/reward.js';
+import { taskCounts } from '../reports/tasks.js';
 import type { SummaryPeriod } from './schemas.js';
 
 export const KPI_KEYS = [
@@ -204,4 +205,24 @@ export async function exportRows(
   const rows: { date: string; day: DayRow | null }[] = [];
   for (let d = from; d <= to; d = addDays(d, 1)) rows.push({ date: d, day: byDate.get(d) ?? null });
   return { from, to, date, rows, totals: sumKpis(days) };
+}
+
+/** GET /me/tasks — own meeting-task and other-work counts in the period (CTO 13 Nov 2026). */
+export async function myTasks(
+  user: AuthUser,
+  opts: { period: SummaryPeriod; date?: string; from?: string },
+) {
+  await connectDb();
+  const settings = await getSettings();
+  const today = karachiDate();
+  const date = opts.date && opts.date < today ? opts.date : today;
+  const { from, to } = periodRange(
+    opts.period,
+    date,
+    today,
+    settings.weekStartsOn,
+    await getRewardRules(),
+    opts.from,
+  );
+  return { from, to, ...(await taskCounts({ userId: new Types.ObjectId(user.id), from, to })) };
 }

@@ -4,7 +4,9 @@ import { parse } from '../../lib/errors.js';
 import { buildMeWorkbook } from './export.js';
 import { summaryQuery } from './schemas.js';
 import { myErp } from '../erp/service.js';
-import { exportRows, reward, summary } from './service.js';
+import { exportRows, myTasks, reward, summary } from './service.js';
+import { taskCounts } from '../reports/tasks.js';
+import { Types } from 'mongoose';
 
 export function meRouter(): Router {
   const router = Router();
@@ -19,6 +21,11 @@ export function meRouter(): Router {
     res.json(await myErp(currentUser(req), parse(summaryQuery, req.query)));
   });
 
+  /** Own task counts in the period (CTO 13 Nov 2026). */
+  router.get('/tasks', async (req, res) => {
+    res.json(await myTasks(currentUser(req), parse(summaryQuery, req.query)));
+  });
+
   router.get('/reward', async (req, res) => {
     res.json(await reward(currentUser(req)));
   });
@@ -31,6 +38,11 @@ export function meRouter(): Router {
       title: `${user.nameUr ?? user.name} · اجیر کوڈ ${user.ajeerCode} · ${data.from} تا ${data.to}`,
       rows: data.rows,
       totals: data.totals,
+      tasks: await taskCounts({
+        userId: new Types.ObjectId(user.id),
+        from: data.from,
+        to: data.to,
+      }),
     });
     const span = query.period === 'range' ? `${data.from}_${data.to}` : data.date;
     const name = `UsherDesk-${user.ajeerCode}-${query.period}-${span}.xlsx`;
