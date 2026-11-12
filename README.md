@@ -306,3 +306,12 @@ cancelled (never deleted).
   day joins its Gaon's list from the next day (`source.kind: zimmedar`).
 - Collection `donors` (unique Gaon + mobile; Gaon + name key; unitPath). The demo seed adds invented
   donors and a local zimmedar to 9090412's first two Gaon.
+
+## Wusooli without a mad (CTO 13 Nov 2026, option A)
+
+- A wusooli entry may have no `category`: the zimmedar writes the Gaon's **naqd total**
+  (`kind: naqd`, amount ≥ 1) and **jins items** (`kind: jins`, `detail` = what, `qty` + `unit` = how
+  much, `amount` = value, 0 allowed). The ERP brings the mad. Niyyat entries still need their mad.
+- Reward until the reward work: a wusooli entry without a mad counts in `rewardWusooli` when naqd,
+  never when jins; GSB as before. Entries with a mad (saved before) keep the category rule, and
+  submitted jadwals keep their stored totals.

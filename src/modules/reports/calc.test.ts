@@ -53,6 +53,24 @@ describe('visitAtiyatTotals', () => {
   });
 });
 
+describe('wusooli without a mad (CTO 13 Nov 2026, option A)', () => {
+  it('the naqd total counts in wusooli and reward; a jins value in wusooli only', () => {
+    const atiyat = {
+      entries: [
+        { type: 'wusooli' as const, kind: 'naqd' as const, amount: 50000 },
+        { type: 'wusooli' as const, kind: 'jins' as const, amount: 4000, detail: 'گندم', qty: 2 },
+        { type: 'wusooli' as const, kind: 'jins' as const, amount: 0, detail: 'چاول', qty: 1 },
+        // An entry saved before 13 Nov keeps its mad rule.
+        { type: 'wusooli' as const, category: 'tameer', kind: 'naqd' as const, amount: 1000 },
+      ],
+    };
+    expect(visitAtiyatTotals(atiyat, categories)).toMatchObject({
+      wusooli: 55000,
+      rewardWusooli: 50000,
+    });
+  });
+});
+
 describe('computeDayTotals', () => {
   const day: JadwalInput = {
     travel: { mode: 'bike', meterStart: 48214, meterEnd: 48276 },

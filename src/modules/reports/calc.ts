@@ -2,7 +2,8 @@
 
 export interface AtiyatEntry {
   type: 'niyyat' | 'wusooli';
-  category: string;
+  /** Absent on a wusooli entry from 13 Nov 2026 (no mad, CTO option A). */
+  category?: string | null;
   kind: 'naqd' | 'jins';
   amount: number;
   detail?: string | null;
@@ -52,7 +53,11 @@ export interface DayTotals {
 
 const n = (v: number | null | undefined) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
-/** Atiyat of one visit: niyyat never counts in wusooli; GSB counts in wusooli and reward. */
+/**
+ * Atiyat of one visit: niyyat never counts in wusooli; GSB counts in wusooli and reward. A wusooli
+ * entry without a mad (CTO 13 Nov 2026, option A — until the reward work): its naqd counts in the
+ * reward, its jins value does not. An entry with a mad keeps the category rule.
+ */
 export function visitAtiyatTotals(atiyat: VisitInput['atiyat'], categories: CategoryRule[]) {
   const included = new Set(categories.filter((c) => c.rewardIncluded).map((c) => c.id));
   let niyyat = 0;
@@ -63,7 +68,7 @@ export function visitAtiyatTotals(atiyat: VisitInput['atiyat'], categories: Cate
       niyyat += n(e.amount);
     } else {
       wusooli += n(e.amount);
-      if (included.has(e.category)) rewardWusooli += n(e.amount);
+      if (e.category ? included.has(e.category) : e.kind === 'naqd') rewardWusooli += n(e.amount);
     }
   }
   const gsbAmount = n(atiyat?.gsb?.amount);

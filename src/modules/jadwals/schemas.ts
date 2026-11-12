@@ -87,17 +87,33 @@ export const atiyatSchema = z
       .array(
         z.object({
           type: z.enum(['niyyat', 'wusooli']),
-          category: z.string().min(1).max(40),
+          // Required for niyyat; a wusooli entry has none (CTO 13 Nov 2026, option A).
+          category: z.string().min(1).max(40).optional(),
           kind: z.enum(['naqd', 'jins']),
-          amount: rupees.min(1),
+          // A jins item's value may be unknown (0).
+          amount: rupees,
           detail: z.string().trim().max(120).optional(),
+          qty: z.number().min(0).max(10_000_000).optional(),
+          unit: z.string().trim().min(1).max(20).optional(),
         }),
       )
       .max(100),
     gsb: z.object({ boxesOpened: count, amount: rupees }).optional(),
   })
-  .refine((b) => b.entries.every((e) => e.kind === 'jins' || !e.detail), {
-    message: 'detail is only for jins (in-kind) entries',
+  .refine((b) => b.entries.every((e) => e.kind === 'jins' || (!e.detail && !e.qty && !e.unit)), {
+    message: 'detail, qty and unit are only for jins (in-kind) entries',
+    path: ['entries'],
+  })
+  .refine((b) => b.entries.every((e) => e.type !== 'niyyat' || e.category), {
+    message: 'a niyyat entry needs its category',
+    path: ['entries'],
+  })
+  .refine((b) => b.entries.every((e) => e.kind === 'jins' || e.amount >= 1), {
+    message: 'a naqd amount must be at least 1',
+    path: ['entries'],
+  })
+  .refine((b) => b.entries.every((e) => e.kind === 'naqd' || e.category || (e.detail && e.qty)), {
+    message: 'a jins wusooli entry needs what (detail) and how much (qty)',
     path: ['entries'],
   });
 

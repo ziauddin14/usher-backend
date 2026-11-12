@@ -289,7 +289,7 @@ export async function saveStep<S extends Step>(
   if (step === 'atiyat') {
     const atiyat = data as StepData['atiyat'];
     const known = new Set((await categories()).map((c) => c.id));
-    const unknown = atiyat.entries.find((e) => !known.has(e.category));
+    const unknown = atiyat.entries.find((e) => e.category && !known.has(e.category));
     if (unknown) {
       throw new AppError(
         400,
