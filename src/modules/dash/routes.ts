@@ -3,7 +3,7 @@ import { currentUser, DASHBOARD_ROLES, requireAuth, requireRole } from '../../li
 import { parse } from '../../lib/errors.js';
 import { dashExport } from './export.js';
 import { exportQuery, monthQuery, periodQuery, unitParams, userParams } from './schemas.js';
-import { unitErp } from '../erp/service.js';
+import { unitErp, userErp } from '../erp/service.js';
 import {
   childrenTable,
   overview,
@@ -50,6 +50,12 @@ export function dashRouter(): Router {
     const { code } = parse(unitParams, req.params);
     const { period, date, from } = parse(periodQuery, req.query);
     res.json(await unitTasks(currentUser(req), code, period, date, from));
+  });
+
+  /** One zimmedar's ERP receipts: written vs ERP, by mad, by donor, lines (CTO 13 Nov 2026). */
+  router.get('/zimmedaran/:userId/erp', async (req, res) => {
+    const { userId } = parse(userParams, req.params);
+    res.json(await userErp(currentUser(req), userId, parse(periodQuery, req.query)));
   });
 
   router.get('/units/:code/villages', async (req, res) => {

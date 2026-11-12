@@ -24,6 +24,8 @@ const erpReceiptSchema = new Schema(
     amount: { type: Number, required: true, min: 0, validate: Number.isInteger },
     /** Mad / head as the ERP names it (not mapped to the app's atiyat categories). */
     mad: { type: String },
+    /** The donor's name as the ERP writes it (CTO 13 Nov 2026). */
+    donorName: { type: String },
     item: { type: String },
     qty: { type: Number, min: 0 },
     qtyUnit: { type: String },
