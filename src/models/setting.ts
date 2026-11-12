@@ -11,6 +11,27 @@ const categorySchema = new Schema(
   { _id: false },
 );
 
+const labelled = {
+  labelUr: { type: String, required: true },
+  labelRoman: { type: String, required: true },
+};
+
+/** A meeting task (settings.donorTasks, CTO 12 Nov 2026); see modules/settings/donor-tasks.ts. */
+const donorTaskSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    ...labelled,
+    order: { type: Number, required: true },
+    count: { type: new Schema(labelled, { _id: false }) },
+    parts: {
+      type: [new Schema({ id: { type: String, required: true }, ...labelled }, { _id: false })],
+      default: undefined,
+    },
+    dayTask: { type: Boolean },
+  },
+  { _id: false },
+);
+
 /** Single document `_id: 'app'` — every configurable rule (data model `settings`). */
 const settingSchema = new Schema(
   {
@@ -44,6 +65,8 @@ const settingSchema = new Schema(
       ijtimaPerMonth: { type: Number, required: true },
       mashwaraPerMonth: { type: Number, required: true },
     },
+    /** Absent in an older document: getSettings() then uses the seed default list. */
+    donorTasks: { type: [donorTaskSchema], default: undefined },
   },
   { timestamps: true },
 );

@@ -266,3 +266,18 @@ mobiles and the other ~78 columns never leave the computer; a month of cash went
 `\N` (the export's empty value) is read as empty. The export has **no Gaon column**: those lines
 have no Gaon. When a later file has fewer lines for a receipt, the missing saved lines are
 cancelled (never deleted).
+
+## Meeting tasks and a day without Gaon (CTO 12 Nov 2026)
+
+- `settings.donorTasks` — the ten meeting tasks from Usher management (multi-select), seed default in
+  `src/modules/settings/donor-tasks.ts`: `count` = ask a number (toray / gattu: bags), `parts` = ask
+  which part (sharai heela / jins muntaqili / farokht; janwar: niyyat / wusooli / farokht),
+  `dayTask` = also offered as the day's other work. A settings document without the list (the live
+  one) uses the default — the live database is not changed for this. `GET /meta` → `donorTasks`.
+- `PUT …/visits/:visitId/donors` takes `tasks` on each new donor and `oldTasks` for the old donors
+  met (one list until the donor list is imported). Checked by `checkTasks` (`jadwals/tasks.ts`):
+  `UNKNOWN_TASK`, `TASK_COUNT_REQUIRED`, `TASK_COUNT_NOT_ALLOWED`, `TASK_PARTS_REQUIRED`,
+  `TASK_PART_UNKNOWN`; stored in settings order.
+- `POST /jadwals/:id/submit` takes `otherTasks` (dayTask tasks only, else `NOT_A_DAY_TASK`). An amli
+  day may now have no Gaon when it has other work; with neither → `NO_VISITS` as before.
+- Not in reports yet (totals unchanged) — counts per task can be added when the reports are defined.
