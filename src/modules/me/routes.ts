@@ -4,7 +4,7 @@ import { parse } from '../../lib/errors.js';
 import { buildMeWorkbook } from './export.js';
 import { summaryQuery } from './schemas.js';
 import { myErp } from '../erp/service.js';
-import { exportRows, myTasks, reward, summary } from './service.js';
+import { exportRows, myPledges, myTasks, reward, summary } from './service.js';
 import { taskCounts } from '../reports/tasks.js';
 import { Types } from 'mongoose';
 
@@ -24,6 +24,11 @@ export function meRouter(): Router {
   /** Own task counts in the period (CTO 13 Nov 2026). */
   router.get('/tasks', async (req, res) => {
     res.json(await myTasks(currentUser(req), parse(summaryQuery, req.query)));
+  });
+
+  /** Own niyyat: open now (by type, by month), written and received in the period. */
+  router.get('/pledges', async (req, res) => {
+    res.json(await myPledges(currentUser(req), parse(summaryQuery, req.query)));
   });
 
   router.get('/reward', async (req, res) => {

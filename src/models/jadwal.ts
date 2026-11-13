@@ -37,7 +37,15 @@ const visitSchema = new Schema({
         met: {
           type: [
             new Schema(
-              { donorId: { type: Schema.Types.ObjectId, ref: 'Donor', required: true }, tasks },
+              {
+                donorId: { type: Schema.Types.ObjectId, ref: 'Donor', required: true },
+                tasks,
+                /** Open niyyat of this donor received today ("وصول ہو گئی", CTO 13 Nov 2026). */
+                closePledges: {
+                  type: [{ type: Schema.Types.ObjectId, ref: 'Pledge' }],
+                  default: undefined,
+                },
+              },
               { _id: false },
             ),
           ],
@@ -79,6 +87,14 @@ const visitSchema = new Schema({
               /** Jins: how much, and its unit (e.g. 40 من). */
               qty: { type: Number, min: 0 },
               unit: { type: String },
+              /**
+               * Niyyat per donor (CTO 13 Nov 2026): عشر or عطیہ, the month by which it is expected,
+               * and the donor — an old donor of the Gaon, or a new donor of this visit by name.
+               */
+              niyyatType: { type: String, enum: ['ushr', 'atiya'] },
+              dueMonth: { type: String, match: /^\d{4}-(0[1-9]|1[0-2])$/ },
+              donorId: { type: Schema.Types.ObjectId, ref: 'Donor' },
+              newDonorName: { type: String },
             },
             { _id: false },
           ),

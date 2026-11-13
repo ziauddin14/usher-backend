@@ -7,6 +7,7 @@ import { unitErp, userErp } from '../erp/service.js';
 import {
   childrenTable,
   overview,
+  unitPledges,
   unitTasks,
   unitVillages,
   zimmedarDays,
@@ -56,6 +57,13 @@ export function dashRouter(): Router {
   router.get('/zimmedaran/:userId/erp', async (req, res) => {
     const { userId } = parse(userParams, req.params);
     res.json(await userErp(currentUser(req), userId, parse(periodQuery, req.query)));
+  });
+
+  /** The unit's niyyat: open now, written and received in the period (CTO 13 Nov 2026). */
+  router.get('/units/:code/pledges', async (req, res) => {
+    const { code } = parse(unitParams, req.params);
+    const { period, date, from } = parse(periodQuery, req.query);
+    res.json(await unitPledges(currentUser(req), code, period, date, from));
   });
 
   router.get('/units/:code/villages', async (req, res) => {

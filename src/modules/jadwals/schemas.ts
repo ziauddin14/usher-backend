@@ -56,7 +56,14 @@ export const donorsSchema = z.object({
   oldTasks: tasksInput.optional(),
   /** Old donors of the Gaon's list met today (CTO 12 Nov 2026); oldMet becomes their number. */
   met: z
-    .array(z.object({ donorId: objectId, tasks: tasksInput.optional() }))
+    .array(
+      z.object({
+        donorId: objectId,
+        tasks: tasksInput.optional(),
+        /** Open niyyat of this donor received today (CTO 13 Nov 2026). */
+        closePledges: z.array(objectId).max(20).optional(),
+      }),
+    )
     .max(1000)
     .optional(),
   newDonors: z
@@ -95,6 +102,14 @@ export const atiyatSchema = z
           detail: z.string().trim().max(120).optional(),
           qty: z.number().min(0).max(10_000_000).optional(),
           unit: z.string().trim().min(1).max(20).optional(),
+          // Niyyat per donor (CTO 13 Nov 2026).
+          niyyatType: z.enum(['ushr', 'atiya']).optional(),
+          dueMonth: z
+            .string()
+            .regex(/^[0-9]{4}-(0[1-9]|1[0-2])$/)
+            .optional(),
+          donorId: objectId.optional(),
+          newDonorName: z.string().trim().min(1).max(80).optional(),
         }),
       )
       .max(100),
@@ -104,10 +119,27 @@ export const atiyatSchema = z
     message: 'detail, qty and unit are only for jins (in-kind) entries',
     path: ['entries'],
   })
-  .refine((b) => b.entries.every((e) => e.type !== 'niyyat' || e.category), {
-    message: 'a niyyat entry needs its category',
-    path: ['entries'],
-  })
+  .refine(
+    (b) =>
+      b.entries.every(
+        (e) =>
+          e.type !== 'niyyat' ||
+          e.category ||
+          (e.niyyatType && e.dueMonth && (e.donorId ? !e.newDonorName : e.newDonorName)),
+      ),
+    {
+      message: 'a niyyat needs its donor (one of donorId / newDonorName), type and month',
+      path: ['entries'],
+    },
+  )
+  .refine(
+    (b) =>
+      b.entries.every(
+        (e) =>
+          e.type === 'niyyat' || (!e.niyyatType && !e.dueMonth && !e.donorId && !e.newDonorName),
+      ),
+    { message: 'donor, type and month are only for a niyyat', path: ['entries'] },
+  )
   .refine((b) => b.entries.every((e) => e.kind === 'jins' || e.amount >= 1), {
     message: 'a naqd amount must be at least 1',
     path: ['entries'],

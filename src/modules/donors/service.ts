@@ -11,6 +11,7 @@ import { Donor, type DonorDoc } from '../../models/donor.js';
 import type { JadwalDoc } from '../../models/jadwal.js';
 import { Village } from '../../models/village.js';
 import { findUsableVillage } from '../villages/service.js';
+import { openPledgesOf, recordPledges } from './pledges.js';
 
 /**
  * Old donors of a Gaon on `date`: every imported donor, and a donor a zimmedar added on an earlier
@@ -31,10 +32,13 @@ export async function villageDonors(user: AuthUser, villageId: string, date?: st
   const usable = await findUsableVillage(user, villageId);
   if (!usable) throw new AppError(404, 'NOT_FOUND', 'Village not found');
   const village = await Village.findById(usable._id).select('name localZimmedar').lean();
-  const donors = await Donor.find(oldOn(usable._id, date ?? karachiDate()))
-    .select('name mobile acres source.kind meetings lastMet')
-    .sort({ nameKey: 1 })
-    .lean();
+  const [donors, pledges] = await Promise.all([
+    Donor.find(oldOn(usable._id, date ?? karachiDate()))
+      .select('name mobile acres source.kind meetings lastMet')
+      .sort({ nameKey: 1 })
+      .lean(),
+    openPledgesOf(usable._id),
+  ]);
   return {
     village: {
       id: String(usable._id),
@@ -53,6 +57,18 @@ export async function villageDonors(user: AuthUser, villageId: string, date?: st
       mobile: d.mobile ?? null,
       acres: d.acres ?? null,
       isNew: d.source.kind === 'zimmedar' && d.meetings === 0,
+      // Open niyyat of the donor, oldest month first (CTO 13 Nov 2026).
+      openPledges: (pledges.get(String(d._id)) ?? []).map((p) => ({
+        id: String(p._id),
+        niyyatType: p.niyyatType,
+        kind: p.kind,
+        amount: p.amount,
+        item: p.item ?? null,
+        qty: p.qty ?? null,
+        unit: p.unit ?? null,
+        dueMonth: p.dueMonth,
+        date: p.date,
+      })),
       lastMet: d.lastMet
         ? {
             date: d.lastMet.date,
@@ -164,4 +180,6 @@ export async function recordDonorMeetings(
     }
   }
   if (writes.length > 0) await Donor.bulkWrite(writes, { ordered: false });
+  // Then the day's niyyat (a new donor's niyyat needs the donor just added) — CTO 13 Nov 2026.
+  await recordPledges(jadwal, pathOf);
 }
