@@ -5,6 +5,7 @@ import { loginCookie } from '../../../test/helpers.js';
 import { createApp } from '../../index.js';
 import { AuditLog } from '../../models/audit-log.js';
 import { ErpReceipt, ErpUpload } from '../../models/erp-receipt.js';
+import { Jadwal } from '../../models/jadwal.js';
 import { User } from '../../models/user.js';
 import { seedDemo } from '../../seed/seed.js';
 
@@ -216,6 +217,60 @@ describe('ERP receipts upload and reports', () => {
     expect(res.body.lines).toHaveLength(3);
     expect(res.body.lines[0]).toMatchObject({ receiptNo: 'R-100', lineNo: 1, mad: 'Telethon' });
     await get(district, '/me/erp?period=day').expect(403);
+  });
+
+  it('donor names, what the zimmedar wrote vs the ERP, and his detail for the District (CTO 13 Nov)', async () => {
+    const me = await User.findOne({ ajeerCode: '9090412' }).lean();
+    await Jadwal.create({
+      userId: me!._id,
+      ajeerCode: '9090412',
+      unitPath: me!.unitPath,
+      date: '2026-11-09',
+      month: '2026-11',
+      entryType: 'amli',
+      status: 'submitted',
+      startedAt: new Date(),
+      submittedAt: new Date(),
+      visits: [],
+      totals: { wusooli: 60000 },
+    });
+    await upload(
+      pakistan,
+      [
+        'receipt_no,receipt_date,ajeer_code,attiyat_type,amount_rs,mad,donor_name',
+        'R-200,2026-11-09,9090412,NAQAD,40000,Ramzan,Donor Alif',
+        'R-201,2026-11-09,9090412,NAQAD,15000,Telethon,Donor Alif',
+        'R-202,2026-11-09,9090412,NAQAD,5000,Telethon,Donor Be',
+      ].join('\n'),
+      true,
+    ).expect(201);
+    const q = 'period=day&date=2026-11-09';
+
+    const own = await get(zimmedar, `/me/erp?${q}`).expect(200);
+    expect(own.body.totals).toMatchObject({ naqd: 60000, written: 60000 });
+    expect(own.body.byDonor).toEqual([
+      { donor: 'Donor Alif', naqd: 55000, jins: 0, receipts: 2 },
+      { donor: 'Donor Be', naqd: 5000, jins: 0, receipts: 1 },
+    ]);
+    expect(own.body.lines[0]).toMatchObject({ donorName: 'Donor Alif' });
+
+    const unit = await get(district, `/dash/units/GHOTKI/erp?${q}`).expect(200);
+    expect(unit.body.totals).toMatchObject({ naqd: 60000, written: 60000 });
+    const row = (unit.body.rows as { ajeerCode: string; written: number; naqd: number }[]).find(
+      (r) => r.ajeerCode === '9090412',
+    );
+    expect(row).toMatchObject({ written: 60000, naqd: 60000 });
+    const div = await get(division, `/dash/units/SUKKUR/erp?${q}`).expect(200);
+    expect(
+      (div.body.rows as { unit: { code: string }; written: number }[]).find(
+        (r) => r.unit.code === 'GHOTKI',
+      )!.written,
+    ).toBe(60000);
+
+    const detail = await get(district, `/dash/zimmedaran/${String(me!._id)}/erp?${q}`).expect(200);
+    expect(detail.body.user).toMatchObject({ ajeerCode: '9090412' });
+    expect(detail.body.byDonor).toHaveLength(2);
+    await get(larkana, `/dash/zimmedaran/${String(me!._id)}/erp?${q}`).expect(404);
   });
 
   it('a too large file is refused', async () => {

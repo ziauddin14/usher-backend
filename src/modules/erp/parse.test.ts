@@ -76,6 +76,7 @@ describe('ERP file reading (CTO 11 Nov 2026)', () => {
       kind: 'naqd',
       amount: 20000,
       mad: 'Telethon Dawat-e-islami 2025',
+      donorName: 'Donor A', // the donor's name is kept (CTO 13 Nov 2026), never the mobile
       cancelled: false,
       fund: 'Nafila',
       deposited: true,

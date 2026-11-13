@@ -7,10 +7,11 @@ import type { AuthUser } from '../../lib/auth.js';
 import { audit } from '../../lib/audit.js';
 import { connectDb } from '../../lib/db.js';
 import { AppError } from '../../lib/errors.js';
-import { escapeRegex } from '../../lib/scope.js';
+import { assertInScope, escapeRegex } from '../../lib/scope.js';
 import { getRewardRules, getSettings } from '../../lib/settings.js';
 import { karachiDate } from '../../lib/time.js';
 import { ErpReceipt, ErpUpload } from '../../models/erp-receipt.js';
+import { Jadwal } from '../../models/jadwal.js';
 import { Unit, type UnitLevel } from '../../models/unit.js';
 import { User } from '../../models/user.js';
 import { unitInScope } from '../dash/service.js';
@@ -41,6 +42,7 @@ const COMPARED = [
   'kind',
   'amount',
   'mad',
+  'donorName',
   'item',
   'qty',
   'qtyUnit',
@@ -178,7 +180,15 @@ export async function erpUpload(
         uploadId: upload._id,
       };
       const unset: Record<string, ''> = {};
-      for (const k of ['mad', 'item', 'qty', 'qtyUnit', 'fund', 'deposited'] as const) {
+      for (const k of [
+        'mad',
+        'donorName',
+        'item',
+        'qty',
+        'qtyUnit',
+        'fund',
+        'deposited',
+      ] as const) {
         if (doc[k] === undefined) {
           delete doc[k];
           unset[k] = '';
@@ -287,8 +297,8 @@ async function byMad(match: Record<string, unknown>) {
 }
 
 async function lastUpload() {
-  const u = await ErpUpload.findOne().sort({ at: -1, _id: -1 }).select('at dateTo').lean();
-  return u ? { at: u.at, dateTo: u.dateTo ?? null } : null;
+  const u = await ErpUpload.findOne().sort({ at: -1, _id: -1 }).select('at dateFrom dateTo').lean();
+  return u ? { at: u.at, dateFrom: u.dateFrom ?? null, dateTo: u.dateTo ?? null } : null;
 }
 
 const LEVEL_ORDER: UnitLevel[] = ['pakistan', 'suba', 'division', 'district', 'tehsil'];
@@ -310,7 +320,7 @@ export async function unitErp(
     date: { $gte: span.from, $lte: span.to },
     cancelled: false,
   };
-  const [perUser, mads, last] = await Promise.all([
+  const [perUser, mads, last, written] = await Promise.all([
     ErpReceipt.aggregate<{
       _id: { u: Types.ObjectId; p: string };
       entries: number;
@@ -320,7 +330,13 @@ export async function unitErp(
     }>([{ $match: match }, { $group: { _id: { u: '$userId', p: '$unitPath' }, ...sumStages } }]),
     byMad(match),
     lastUpload(),
+    writtenWusooli({ unitPath: match.unitPath }, span),
   ]);
+  const writtenBy = new Map<string, number>();
+  for (const w of written) {
+    writtenBy.set(String(w._id.u), (writtenBy.get(String(w._id.u)) ?? 0) + w.wusooli);
+  }
+  const writtenTotal = written.reduce((s, w) => s + w.wusooli, 0);
 
   const totals = emptySums();
   const receiptSet = new Set<string>();
@@ -332,7 +348,13 @@ export async function unitErp(
   }
   totals.receipts = receiptSet.size;
 
-  const base = { unit, ...span, totals, byMad: mads, lastUpload: last };
+  const base = {
+    unit,
+    ...span,
+    totals: { ...totals, written: writtenTotal },
+    byMad: mads,
+    lastUpload: last,
+  };
   if (unit.level === 'district' || unit.level === 'tehsil') {
     // Every active zimmedar of the unit is listed (0 = no ERP receipt in the period), plus anyone
     // else whose receipts are filed under the unit.
@@ -367,6 +389,7 @@ export async function unitErp(
         nameUr: u.nameUr ?? null,
         unitCode: u.unitCode,
         ...(sums.get(String(u._id)) ?? emptySums()),
+        written: writtenBy.get(String(u._id)) ?? 0,
       }))
       .sort((a, b) => b.naqd + b.jins - (a.naqd + a.jins) || a.name.localeCompare(b.name));
     return { ...base, rowsKind: 'zimmedaran' as const, rows };
@@ -387,9 +410,11 @@ export async function unitErp(
       for (const no of r.receipts) set.add(String(no));
     }
     s.receipts = set.size;
+    const inChild = (p: string) => p === c.path || p.startsWith(`${c.path}/`);
     return {
       unit: { code: c.code, name: c.name, nameUr: c.nameUr ?? null, level: c.level },
       ...s,
+      written: written.filter((w) => inChild(w._id.p)).reduce((t, w) => t + w.wusooli, 0),
     };
   });
   return {
@@ -400,43 +425,80 @@ export async function unitErp(
   };
 }
 
+/**
+ * What the zimmedaran wrote in UsherDesk (submitted jadwals' wusooli) in the period, per user and
+ * unit — set next to the ERP receipts (CTO 13 Nov 2026: one total in UsherDesk, the details from
+ * the ERP).
+ */
+async function writtenWusooli(
+  filter: { userId: Types.ObjectId } | { unitPath: { $regex: string } },
+  span: { from: string; to: string },
+) {
+  return Jadwal.aggregate<{ _id: { u: Types.ObjectId; p: string }; wusooli: number }>([
+    { $match: { ...filter, status: 'submitted', date: { $gte: span.from, $lte: span.to } } },
+    {
+      $group: {
+        _id: { u: '$userId', p: '$unitPath' },
+        wusooli: { $sum: { $ifNull: ['$totals.wusooli', 0] } },
+      },
+    },
+  ]);
+}
+
 /** Receipt lines listed on a zimmedar's own screen (newest first). */
 const MAX_OWN_LINES = 300;
 
-/** GET /me/erp — the zimmedar's own ERP receipts in a period: totals, by mad, lines. */
-export async function myErp(
-  user: AuthUser,
-  q: { period: SummaryPeriod; date?: string | undefined; from?: string | undefined },
-) {
-  await connectDb();
+type Query = { period: SummaryPeriod; date?: string | undefined; from?: string | undefined };
+
+/**
+ * One zimmedar's ERP receipts in a period (CTO 13 Nov 2026): what he wrote in UsherDesk next to
+ * what the ERP shows reached the account — by mad, by donor, and line by line.
+ */
+async function erpOfUser(userId: Types.ObjectId, q: Query) {
   const span = await range(q.period, q.date, q.from);
-  const match = {
-    userId: new Types.ObjectId(user.id),
-    date: { $gte: span.from, $lte: span.to },
-    cancelled: false,
-  };
-  const [lines, mads, last] = await Promise.all([
+  const match = { userId, date: { $gte: span.from, $lte: span.to }, cancelled: false };
+  const [lines, mads, last, written] = await Promise.all([
     ErpReceipt.find(match)
-      .select('receiptNo lineNo date kind amount mad item qty qtyUnit')
+      .select('receiptNo lineNo date kind amount mad donorName item qty qtyUnit')
       .sort({ date: -1, receiptNo: 1, lineNo: 1 })
       .lean(),
     byMad(match),
     lastUpload(),
+    writtenWusooli({ userId }, span),
   ]);
-  const totals = emptySums();
+  const totals = { ...emptySums(), written: written.reduce((s, w) => s + w.wusooli, 0) };
   totals.entries = lines.length;
   totals.receipts = new Set(lines.map((l) => l.receiptNo)).size;
+  const donors = new Map<
+    string,
+    { donor: string | null; naqd: number; jins: number; receipts: Set<string> }
+  >();
   for (const l of lines) {
     if (l.kind === 'naqd') totals.naqd += l.amount;
     else totals.jins += l.amount;
+    const key = l.donorName ?? '';
+    const d = donors.get(key) ?? {
+      donor: l.donorName ?? null,
+      naqd: 0,
+      jins: 0,
+      receipts: new Set(),
+    };
+    if (l.kind === 'naqd') d.naqd += l.amount;
+    else d.jins += l.amount;
+    d.receipts.add(l.receiptNo);
+    donors.set(key, d);
   }
   return {
     ...span,
     totals,
     byMad: mads,
+    byDonor: [...donors.values()]
+      .map(({ receipts, ...d }) => ({ ...d, receipts: receipts.size }))
+      .sort((a, b) => b.naqd + b.jins - (a.naqd + a.jins)),
     lines: lines.slice(0, MAX_OWN_LINES).map(({ _id, ...l }) => ({
       ...l,
       mad: l.mad ?? null,
+      donorName: l.donorName ?? null,
       item: l.item ?? null,
       qty: l.qty ?? null,
       qtyUnit: l.qtyUnit ?? null,
@@ -446,11 +508,33 @@ export async function myErp(
   };
 }
 
+/** GET /me/erp — the zimmedar's own ERP receipts in a period. */
+export async function myErp(user: AuthUser, q: Query) {
+  await connectDb();
+  return erpOfUser(new Types.ObjectId(user.id), q);
+}
+
+/** GET /dash/zimmedaran/:userId/erp — a zimmedar in the caller's scope (404 otherwise). */
+export async function userErp(caller: AuthUser, userId: string, q: Query) {
+  await connectDb();
+  const user = await User.findById(userId).select('_id ajeerCode name nameUr unitPath').lean();
+  assertInScope(caller, user ? { unitPath: user.unitPath } : null);
+  return {
+    user: {
+      id: String(user!._id),
+      ajeerCode: user!.ajeerCode,
+      name: user!.name,
+      nameUr: user!.nameUr ?? null,
+    },
+    ...(await erpOfUser(user!._id, q)),
+  };
+}
+
 /** The format sample for the ERP / Finance team (invented values). */
 export const ERP_TEMPLATE_CSV = [
-  'receipt_no,line_no,receipt_date,ajeer_code,attiyat_type,amount_rs,mad,jins_item,jins_qty,jins_unit,status,suba,division,district,tehsil',
-  'ER-2026-000101,1,2026-11-11,1234567,NAQAD,20000,Telethon,,,,ACTIVE,Sindh,Sukkur,Ghotki,Mirpur Mathelo',
-  'ER-2026-000101,2,2026-11-11,1234567,NAQAD,25000,Ramzan Atiyat,,,,ACTIVE,Sindh,Sukkur,Ghotki,Mirpur Mathelo',
-  'ER-2026-000102,1,2026-11-11,1234567,JINS,5000,Ushr,Chawal,40,KG,ACTIVE,Sindh,Sukkur,Ghotki,Mirpur Mathelo',
-  'ER-2026-000099,1,2026-11-10,1234567,NAQAD,1500,Mahana Atiyat,,,,CANCELLED,Sindh,Sukkur,Ghotki,Mirpur Mathelo',
+  'receipt_no,line_no,receipt_date,ajeer_code,donor_name,attiyat_type,amount_rs,mad,jins_item,jins_qty,jins_unit,status,suba,division,district,tehsil',
+  'ER-2026-000101,1,2026-11-11,1234567,Donor Misal,NAQAD,20000,Telethon,,,,ACTIVE,Sindh,Sukkur,Ghotki,Mirpur Mathelo',
+  'ER-2026-000101,2,2026-11-11,1234567,Donor Misal,NAQAD,25000,Ramzan Atiyat,,,,ACTIVE,Sindh,Sukkur,Ghotki,Mirpur Mathelo',
+  'ER-2026-000102,1,2026-11-11,1234567,Donor Namoona,JINS,5000,Ushr,Chawal,40,KG,ACTIVE,Sindh,Sukkur,Ghotki,Mirpur Mathelo',
+  'ER-2026-000099,1,2026-11-10,1234567,Donor Namoona,NAQAD,1500,Mahana Atiyat,,,,CANCELLED,Sindh,Sukkur,Ghotki,Mirpur Mathelo',
 ].join('\r\n');

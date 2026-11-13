@@ -323,3 +323,14 @@ meeting task how often it was ticked (`times`; per donor, the old-donor list wit
 for a count task, the numbers added up (`units`, e.g. toray / gattu bags); for every other work the
 days it was done. Counted from submitted amli jadwals (earlier days too). The zimmedar's Excel gets a
 "کام" sheet; the dashboard zimmedaran / children Excel a "Kaam" sheet.
+
+## ERP: donors, written vs ERP, a zimmedar's detail (CTO 13 Nov 2026)
+
+- The donor's **name** is read (`donor_name` / E-Raseed "Donor Name"; never a mobile) and kept on each
+  receipt line. The browser still drops every other personal column before upload.
+- Every ERP report puts **what was written in UsherDesk** (submitted jadwals' wusooli, same period)
+  next to what the ERP shows reached the account: `totals.written`, and `written` on each zimmedar /
+  child-unit row of `GET /dash/units/:code/erp`.
+- `GET /dash/zimmedaran/:userId/erp?period=…` (a zimmedar in the caller's scope, else 404) and
+  `GET /me/erp`: totals with `written`, by mad, **by donor**, and the lines (with the donor's name).
+- `lastUpload` has `dateFrom` and `dateTo` (the dashboard can jump to the last upload's dates).

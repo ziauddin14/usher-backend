@@ -26,6 +26,8 @@ export const ERP_COLUMNS = {
   qty: ['jinsqty', 'weightqty', 'qty', 'quantity'],
   qtyUnit: ['jinsunit', 'qtyunit', 'unit'],
   status: ['status', 'activecancel'],
+  /** The donor's name (CTO 13 Nov 2026: details per donor); never the donor's mobile. */
+  donor: ['donorname', 'donor', 'نامڈونر'],
   /** E-Raseed extras kept for later reports (Wajiba / Nafila; deposited or not). */
   fund: ['fundcategory'],
   deposit: ['depositundeposit'],
@@ -63,6 +65,7 @@ export interface ErpLine {
   kind: 'naqd' | 'jins';
   amount: number;
   mad?: string;
+  donorName?: string;
   item?: string;
   qty?: number;
   qtyUnit?: string;
@@ -359,6 +362,7 @@ export function checkErpRows(
       kind,
       amount,
       ...(v.mad ? { mad: v.mad.slice(0, 80) } : {}),
+      ...(v.donor ? { donorName: v.donor.slice(0, 80) } : {}),
       ...(v.item ? { item: v.item.slice(0, 80) } : {}),
       ...(qty !== undefined ? { qty } : {}),
       ...(v.qtyUnit ? { qtyUnit: v.qtyUnit.slice(0, 20) } : {}),
