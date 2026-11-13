@@ -66,10 +66,19 @@ const visitSchema = new Schema({
           new Schema(
             {
               type: { type: String, enum: ['niyyat', 'wusooli'], required: true },
-              category: { type: String, required: true },
+              /**
+               * Mad (settings.atiyatCategories). Absent on a wusooli entry from 13 Nov 2026 (CTO,
+               * option A): the zimmedar writes only the Gaon's naqd total and jins items; the ERP
+               * brings the mad.
+               */
+              category: { type: String },
               kind: { type: String, enum: ['naqd', 'jins'], required: true },
               amount: { ...money, required: true },
+              /** Jins: what (e.g. گندم). */
               detail: { type: String },
+              /** Jins: how much, and its unit (e.g. 40 من). */
+              qty: { type: Number, min: 0 },
+              unit: { type: String },
             },
             { _id: false },
           ),
