@@ -443,7 +443,10 @@ class UnitResolver {
   }
 
   root(): UnitRef {
-    const existing = [...this.byParentAndKey.values()].find((u) => u.level === 'pakistan');
+    // The national unit by its code: a test sandbox root (TEST, 13 Nov 2026) is never the root.
+    const existing = [...this.byParentAndKey.values()].find(
+      (u) => u.level === 'pakistan' && u.code === 'PK',
+    );
     return existing ?? this.create('Pakistan', 'pakistan', null, 'PK');
   }
 

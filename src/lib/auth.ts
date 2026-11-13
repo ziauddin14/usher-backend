@@ -22,6 +22,8 @@ export interface AuthUser {
   mustChangePassword: boolean;
   /** users.sessionVersion when the session was checked (see signSession). */
   sessionVersion?: number;
+  /** Test-mode zimmedar in the TEST sandbox (CTO 13 Nov 2026). */
+  isTest?: boolean;
   /** Department of a centrally provisioned account (e.g. CENTRAL_IT), re-read on every request. */
   department?: Department;
 }
@@ -108,7 +110,7 @@ async function loadSessionUser(req: Request): Promise<void> {
   await connectDb();
   const user = await User.findById(payload.sub)
     .select(
-      'ajeerCode name nameUr role zimmedari unitCode unitPath isActive mustChangePassword sessionVersion department',
+      'ajeerCode name nameUr role zimmedari unitCode unitPath isActive mustChangePassword sessionVersion department isTest',
     )
     .lean();
   if (!user?.isActive || (payload.sv ?? 0) !== (user.sessionVersion ?? 0)) {
@@ -126,6 +128,7 @@ async function loadSessionUser(req: Request): Promise<void> {
     mustChangePassword: user.mustChangePassword,
     sessionVersion: user.sessionVersion ?? 0,
     ...(user.department ? { department: user.department } : {}),
+    ...(user.isTest ? { isTest: true } : {}),
   };
 }
 

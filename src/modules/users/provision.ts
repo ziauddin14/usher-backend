@@ -60,7 +60,8 @@ export async function provisionPakistanAdmin(input: ProvisionInput): Promise<Pro
       message: 'An account with this ajeer code already exists — provisioning never promotes one',
     };
   }
-  const unit = await Unit.findOne({ level: 'pakistan' }).select('code path').lean();
+  // The national unit by its code (a test sandbox root TEST is also level pakistan).
+  const unit = await Unit.findOne({ code: 'PK', level: 'pakistan' }).select('code path').lean();
   if (!unit) {
     return { ok: false, reason: 'NO_PAKISTAN_UNIT', message: 'The national unit does not exist' };
   }

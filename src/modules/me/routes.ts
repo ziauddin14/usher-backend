@@ -4,6 +4,7 @@ import { parse } from '../../lib/errors.js';
 import { buildMeWorkbook } from './export.js';
 import { summaryQuery } from './schemas.js';
 import { myErp } from '../erp/service.js';
+import { resetTestData } from '../test-user/service.js';
 import { exportRows, myPledges, myTasks, reward, summary } from './service.js';
 import { taskCounts } from '../reports/tasks.js';
 import { Types } from 'mongoose';
@@ -29,6 +30,11 @@ export function meRouter(): Router {
   /** Own niyyat: open now (by type, by month), written and received in the period. */
   router.get('/pledges', async (req, res) => {
     res.json(await myPledges(currentUser(req), parse(summaryQuery, req.query)));
+  });
+
+  /** Test-mode zimmedar only: clear all his test data now (CTO 13 Nov 2026). */
+  router.post('/test-reset', async (req, res) => {
+    res.json(await resetTestData(currentUser(req)));
   });
 
   router.get('/reward', async (req, res) => {

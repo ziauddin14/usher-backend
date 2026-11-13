@@ -16,6 +16,7 @@ import { Village } from '../models/village.js';
 import { ErpReceipt, ErpUpload } from '../models/erp-receipt.js';
 import { Donor } from '../models/donor.js';
 import { Pledge } from '../models/pledge.js';
+import { provisionTestUser, TEST_AJEER_CODE } from '../modules/test-user/service.js';
 import { BCRYPT_COST } from '../modules/auth/service.js';
 import { seedHistory } from './history.js';
 import {
@@ -163,7 +164,11 @@ export interface SeedResult {
  * kept; `reset` wipes the demo collections first. Tests that create their own days leave
  * `history` off.
  */
-export async function seedDemo({ reset = false, history = false } = {}): Promise<SeedResult> {
+export async function seedDemo({
+  reset = false,
+  history = false,
+  testUser = false,
+} = {}): Promise<SeedResult> {
   assertDemoDb(env().MONGODB_URI); // invented data never goes into ushr_live
   await connectDb();
 
@@ -253,6 +258,11 @@ export async function seedDemo({ reset = false, history = false } = {}): Promise
   await Village.bulkWrite(villageOps);
   await assignSeedVillages();
   await seedDemoDonors();
+  if (testUser) {
+    // The test-mode zimmedar (CTO 13 Nov 2026), for the end-to-end tests; no forced password change.
+    await provisionTestUser({ dryRun: false, operator: 'seed' });
+    await User.updateOne({ ajeerCode: TEST_AJEER_CODE }, { $set: { mustChangePassword: false } });
+  }
 
   const { jadwals } = history ? await seedHistory() : { jadwals: 0 };
 

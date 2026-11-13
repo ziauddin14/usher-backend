@@ -1,6 +1,7 @@
 // pnpm seed             → idempotent demo seed into MONGODB_URI (ushr_demo; never a live database)
 // pnpm seed --if-empty  → full seed only when the database has no users yet; otherwise only top up the
 //                         invented jadwal history to yesterday (start-local.ps1, every start)
+// pnpm seed --test-user → also the test-mode zimmedar 999999001 (end-to-end tests)
 // pnpm seed --reset     → wipe demo collections first (always needs SEED_CONFIRM=<database name>,
 //                         e.g. SEED_CONFIRM=ushr_demo)
 import { connectDb, disconnectDb } from '../src/lib/db.js';
@@ -33,7 +34,11 @@ async function main(): Promise<void> {
       return;
     }
   }
-  const result = await seedDemo({ reset, history: true });
+  const result = await seedDemo({
+    reset,
+    history: true,
+    testUser: process.argv.includes('--test-user'),
+  });
   console.warn(
     `Seed done${reset ? ' (after reset)' : ''}: ${result.units} units, ${result.users} users, ${result.villages} villages, ${result.jadwals} new history days.`,
   );
