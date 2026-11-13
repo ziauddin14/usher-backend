@@ -15,6 +15,7 @@ import { User } from '../models/user.js';
 import { Village } from '../models/village.js';
 import { ErpReceipt, ErpUpload } from '../models/erp-receipt.js';
 import { Donor } from '../models/donor.js';
+import { Pledge } from '../models/pledge.js';
 import { BCRYPT_COST } from '../modules/auth/service.js';
 import { seedHistory } from './history.js';
 import {
@@ -37,6 +38,7 @@ const ALL_MODELS = [
   ErpReceipt,
   ErpUpload,
   Donor,
+  Pledge,
 ] as const;
 
 /**
@@ -44,17 +46,28 @@ const ALL_MODELS = [
  * so the donor list can be tried. Idempotent (upsert by Gaon + mobile).
  */
 async function seedDemoDonors(): Promise<void> {
-  const demo = await User.findOne({ ajeerCode: '9090412' }).select('_id').lean();
-  if (!demo) return;
-  const villages = await Village.find({ assignedTo: demo._id, status: 'approved' })
-    .sort({ nameKey: 1 })
-    .limit(2)
+  // 9090412 for the demo; 9000004 (no history in the back-date window) for the e2e tests.
+  const demos = await User.find({ ajeerCode: { $in: ['9090412', '9000004'] } })
+    .select('_id ajeerCode')
+    .sort({ ajeerCode: -1 })
     .lean();
+  const villages = (
+    await Promise.all(
+      demos.map((d) =>
+        Village.find({ assignedTo: d._id, status: 'approved' })
+          .sort({ nameKey: 1 })
+          // Every Gaon of the e2e zimmedar; the first two of the demo zimmedar.
+          .limit(d.ajeerCode === '9000004' ? 0 : 2)
+          .lean(),
+      ),
+    )
+  ).flat();
+  if (villages.length === 0) return;
   const now = new Date();
   const ops = villages.flatMap((v, vi) =>
     [1, 2, 3].map((n) => {
       const name = `نمونہ ڈونر ${vi * 3 + n}`;
-      const mobile = `0300000${String(1000 + vi * 10 + n)}`;
+      const mobile = `0300000${String(1000 + vi * 10 + n).padStart(4, '0')}`;
       return {
         updateOne: {
           filter: { villageId: v._id, mobile },
@@ -166,6 +179,7 @@ export async function seedDemo({ reset = false, history = false } = {}): Promise
       ErpReceipt.deleteMany(),
       ErpUpload.deleteMany(),
       Donor.deleteMany(),
+      Pledge.deleteMany(),
     ]);
     clearSettingsCache();
   }

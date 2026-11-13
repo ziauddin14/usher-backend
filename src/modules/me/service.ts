@@ -17,6 +17,7 @@ import {
   rewardStatus,
 } from '../reports/reward.js';
 import { taskCounts } from '../reports/tasks.js';
+import { pledgeReport } from '../donors/pledges.js';
 import type { SummaryPeriod } from './schemas.js';
 
 export const KPI_KEYS = [
@@ -225,4 +226,24 @@ export async function myTasks(
     opts.from,
   );
   return { from, to, ...(await taskCounts({ userId: new Types.ObjectId(user.id), from, to })) };
+}
+
+/** GET /me/pledges — own niyyat (CTO 13 Nov 2026). */
+export async function myPledges(
+  user: AuthUser,
+  opts: { period: SummaryPeriod; date?: string; from?: string },
+) {
+  await connectDb();
+  const settings = await getSettings();
+  const today = karachiDate();
+  const date = opts.date && opts.date < today ? opts.date : today;
+  const span = periodRange(
+    opts.period,
+    date,
+    today,
+    settings.weekStartsOn,
+    await getRewardRules(),
+    opts.from,
+  );
+  return pledgeReport({ userId: new Types.ObjectId(user.id) }, span);
 }

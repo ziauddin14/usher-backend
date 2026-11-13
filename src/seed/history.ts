@@ -25,6 +25,12 @@ export function historyStart(today: string): string {
   return `${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, '0')}-01`;
 }
 export const DEMO_ZIMMEDAR = '9090412';
+/**
+ * Demo zimmedar whose last days stay empty (no history in the back-date window), so a back-dated
+ * day can always be started — the end-to-end tests use him with the demo donors (13 Nov 2026).
+ */
+export const OPEN_DAYS_ZIMMEDAR = '9000004';
+const OPEN_DAYS = 3;
 
 /**
  * The demo zimmedar's reward-eligible wusooli per month. H1-2026 (Dec–May) totals 1,284,000 →
@@ -337,6 +343,9 @@ export async function seedHistory(
         // A month with records is finished as it is (it may come from an older generator);
         // only the current month is continued after its last record.
         if (last && month !== today.slice(0, 7)) return false;
+        if (z.ajeerCode === OPEN_DAYS_ZIMMEDAR && date > addDays(today, -(OPEN_DAYS + 1))) {
+          return false;
+        }
         return date <= yesterday && !existing.has(date) && date > (last ?? '');
       })
       .map((doc) => ({

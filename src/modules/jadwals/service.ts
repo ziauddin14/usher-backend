@@ -12,6 +12,7 @@ import { computeDayTotals } from '../reports/calc.js';
 import { findUsableVillage } from '../villages/service.js';
 import { checkTasks } from './tasks.js';
 import { checkMetDonors, recordDonorMeetings } from '../donors/service.js';
+import { checkClosePledges, checkNiyyatDonors } from '../donors/pledges.js';
 import type {
   atiyatSchema,
   createJadwalSchema,
@@ -280,6 +281,7 @@ export async function saveStep<S extends Step>(
     if (donors.oldTasks) donors.oldTasks = checkTasks(donors.oldTasks, defs);
     if (donors.met) {
       await checkMetDonors(visit.villageId, doc.date, donors.met);
+      await checkClosePledges(donors.met);
       for (const m of donors.met) if (m.tasks) m.tasks = checkTasks(m.tasks, defs);
       donors.oldMet = donors.met.length;
     }
@@ -288,6 +290,13 @@ export async function saveStep<S extends Step>(
 
   if (step === 'atiyat') {
     const atiyat = data as StepData['atiyat'];
+    // Niyyat per donor: an old donor of the Gaon or a new donor of this visit (CTO 13 Nov 2026).
+    await checkNiyyatDonors(
+      visit.villageId,
+      doc.date,
+      atiyat.entries,
+      (visit.donors?.newDonors ?? []).map((n) => n.name),
+    );
     const known = new Set((await categories()).map((c) => c.id));
     const unknown = atiyat.entries.find((e) => e.category && !known.has(e.category));
     if (unknown) {

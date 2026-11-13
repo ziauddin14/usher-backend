@@ -15,6 +15,7 @@ import { Village } from '../../models/village.js';
 import { KPI_KEYS, type Kpis, periodRange } from '../me/service.js';
 import { periodFor, type RewardRules, rewardStatus } from '../reports/reward.js';
 import { taskCounts } from '../reports/tasks.js';
+import { pledgeReport } from '../donors/pledges.js';
 import type { DashPeriod } from './schemas.js';
 
 const LEVEL_ORDER: UnitLevel[] = ['pakistan', 'suba', 'division', 'district', 'tehsil'];
@@ -484,4 +485,27 @@ export async function unitTasks(
     rangeFrom,
   );
   return { unit, from, to, ...(await taskCounts({ unitPath: pathRegex(unit.path), from, to })) };
+}
+
+/** GET /dash/units/:code/pledges — the unit's niyyat (CTO 13 Nov 2026). */
+export async function unitPledges(
+  caller: AuthUser,
+  code: string,
+  period: DashPeriod,
+  date?: string,
+  rangeFrom?: string,
+) {
+  const unit = await unitInScope(caller, code);
+  const settings = await getSettings();
+  const today = karachiDate();
+  const day = date && date < today ? date : today;
+  const span = periodRange(
+    period,
+    day,
+    today,
+    settings.weekStartsOn,
+    await getRewardRules(),
+    rangeFrom,
+  );
+  return { unit, ...(await pledgeReport({ unitPath: pathRegex(unit.path) }, span)) };
 }

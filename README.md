@@ -334,3 +334,19 @@ days it was done. Counted from submitted amli jadwals (earlier days too). The zi
 - `GET /dash/zimmedaran/:userId/erp?period=…` (a zimmedar in the caller's scope, else 404) and
   `GET /me/erp`: totals with `written`, by mad, **by donor**, and the lines (with the donor's name).
 - `lastUpload` has `dateFrom` and `dateTo` (the dashboard can jump to the last upload's dates).
+
+## Niyyat per donor (CTO 13 Nov 2026)
+
+- A niyyat entry without a mad has its donor (`donorId` of an old donor of the Gaon, or
+  `newDonorName` of a new donor already saved on the visit — else `NEW_DONOR_UNKNOWN`),
+  `niyyatType` (`ushr` / `atiya`), `dueMonth` (YYYY-MM), and naqd (amount) or jins (`detail`,
+  `qty`, `unit`, optional value). Niyyat with a mad saved earlier keep working.
+- On submit each becomes a **pledge** (`pledges`, one per entry; a re-submit updates it, a niyyat
+  removed from a reopened day is marked `cancelled`, never deleted).
+- `GET /villages/:id/donors` shows each donor's `openPledges`. The donors step takes
+  `met[].closePledges` (open niyyat of that donor only, else `PLEDGE_NOT_OPEN`); on submit they
+  become `received` with the date.
+- Reports: `GET /me/pledges` and `GET /dash/units/:code/pledges` → open now (total, عشر, عطیہ, by
+  month), written and received in the period (naqd and jins by item / unit).
+- Demo seed: 9000004 keeps the back-date window free of history and has invented donors in every
+  Gaon (for the end-to-end tests).
