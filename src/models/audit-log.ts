@@ -26,6 +26,10 @@ export const AUDIT_ACTIONS = [
   'ERP_UPLOAD',
   // Shoba Ushar's donor list imported (CTO 12 Nov 2026).
   'IMPORT_DONORS',
+  // A District marked a pool Gaon's problem as handled (CTO 13 Nov 2026).
+  'VILLAGE_ISSUE_RESOLVE',
+  // One-time move to no Tehsil level (CTO 13 Nov 2026): counts only.
+  'MIGRATE_NO_TEHSIL',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

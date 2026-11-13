@@ -32,7 +32,7 @@ const HEADER = [
   'Town',
 ];
 
-/** A Tehsil/Town Zimmedar row: held itself, but the verified parent of Ushar rows in that Town. */
+/** A Tehsil/Town Zimmedar row: a zimmedar of the District since CTO 13 Nov 2026 (no Tehsil level). */
 const GHOTKI_TEHSIL = [
   880099,
   'Test Tehsil',
@@ -149,7 +149,8 @@ describe('employee import', () => {
         '',
         'Ghotki Town',
       ],
-      // holds (CTO 9 Nov 2026): the Tehsil itself, and an Ushar whose Town has no Tehsil
+      // A Tehsil/Town Zimmedar, and an Ushar whose Town has no Tehsil Zimmedar — both imported
+      // under the District since CTO 13 Nov 2026 (no hold).
       GHOTKI_TEHSIL,
       [880011, 'No Parent', '', 'Ushar', 'Interior Sindh', 'Sukkur', 'Ghotki', '', 'Other Town'],
     ]);
@@ -177,7 +178,12 @@ describe('employee import', () => {
     expect(plan.errors.find((e) => e.row === 11)?.message).toBe(
       'Ajeer Code appears twice in the file with another name (first row kept)',
     );
-    expect(plan.warnings.map((w) => w.ajeerCode)).toEqual(['880007', '9090412', '880099']); // no mobile
+    expect(plan.warnings.map((w) => w.ajeerCode)).toEqual([
+      '880007',
+      '9090412',
+      '880099',
+      '880011',
+    ]); // no mobile
     expect(plan.otherSuffix).toEqual([
       expect.objectContaining({ row: 11, ajeerCodeFull: '880001/2', imported: false }),
     ]);
@@ -193,41 +199,32 @@ describe('employee import', () => {
     ]);
   });
 
-  it('imports the Tehsil (Phase 2) and holds an Ushar whose District + Town has no Tehsil (CTO 9 Nov 2026)', async () => {
+  it('a Tehsil/Town Zimmedar is a zimmedar of the District; nobody is held (CTO 13 Nov 2026)', async () => {
     const plan = validateRows(await readEmployeeSheet(file));
-    expect(plan.onHold.map((h) => [h.ajeerCode, h.reason])).toEqual([
-      ['880011', 'NO_TEHSIL_PARENT'],
-    ]);
-    expect(plan.onHold[0]).toMatchObject({ district: 'Ghotki', town: 'Other Town' });
+    expect(plan.onHold).toEqual([]);
     expect(plan.valid.find((v) => v.ajeerCode === '880099')).toMatchObject({
-      role: 'tehsil',
+      role: 'zimmedar',
+      zimmedari: 'tehsil_town',
       district: 'Ghotki',
-      town: 'Ghotki Town',
     });
-    // Same Town written with another case / spacing is the same place; another Town is not.
     expect(plan.valid.map((v) => v.ajeerCode)).toEqual(
-      expect.arrayContaining(['880001', '880007', '9090412']),
+      expect.arrayContaining(['880001', '880007', '9090412', '880011']),
     );
-    expect(plan.valid.map((v) => v.ajeerCode)).not.toContain('880011');
     const codes = hrCodesFromPlan(plan);
-    expect([...codes.onHold]).toEqual(['880011']);
+    expect([...codes.onHold]).toEqual([]);
   });
 
   it('--dry-run writes nothing', async () => {
     const before = { users: await User.countDocuments(), units: await Unit.countDocuments() };
     const result = await importEmployees(await readEmployeeSheet(file), { dryRun: true });
-    expect(result).toMatchObject({ dryRun: true, created: 4, updated: 1 });
+    expect(result).toMatchObject({ dryRun: true, created: 5, updated: 1 });
+    // No Tehsil unit is ever created (CTO 13 Nov 2026).
     expect(result.newUnits.map((u) => u.path).sort()).toEqual([
       'PK/BALOCHISTAN',
       'PK/BALOCHISTAN/QUETTA',
       'PK/BALOCHISTAN/QUETTA/QUETTA_DIST',
-      'PK/INT_SINDH/SUKKUR/GHOTKI/GHOTKI_TOWN',
       'PK/INT_SINDH/SUKKUR/ROHRI',
     ]);
-    // The Tehsil unit is the Town exactly as HR writes it, under its District.
-    expect(result.newUnits.find((u) => u.level === 'tehsil')).toMatchObject({
-      name: 'Ghotki Town',
-    });
     expect(await User.countDocuments()).toBe(before.users);
     expect(await Unit.countDocuments()).toBe(before.units);
   });
@@ -235,7 +232,7 @@ describe('employee import', () => {
   it('imports: new users get password demo1234 + forced change; existing passwords stay', async () => {
     const before = await User.findOne({ ajeerCode: '880007' }).select('+passwordHash').lean();
     const result = await importEmployees(await readEmployeeSheet(file), { dryRun: false });
-    expect(result).toMatchObject({ created: 4, updated: 1 });
+    expect(result).toMatchObject({ created: 5, updated: 1 });
     expect(result.errors.find((e) => e.ajeerCode === '9090412')?.message).toMatch(/demo user/);
 
     const one = await User.findOne({ ajeerCode: '880001' }).select('+passwordHash').lean();
@@ -243,8 +240,8 @@ describe('employee import', () => {
       ajeerCodeFull: '880001/1',
       role: 'zimmedar',
       zimmedari: 'ushar',
-      unitCode: 'GHOTKI_TOWN',
-      unitPath: 'PK/INT_SINDH/SUKKUR/GHOTKI/GHOTKI_TOWN',
+      unitCode: 'GHOTKI',
+      unitPath: 'PK/INT_SINDH/SUKKUR/GHOTKI',
       fatherName: 'Test Walid',
       mobile: '03001112233',
       mustChangePassword: true,
@@ -268,7 +265,7 @@ describe('employee import', () => {
     expect(after).toMatchObject({
       name: 'Renamed Zimmedar',
       zimmedari: 'event',
-      unitPath: 'PK/INT_SINDH/SUKKUR/GHOTKI/GHOTKI_TOWN',
+      unitPath: 'PK/INT_SINDH/SUKKUR/GHOTKI',
     });
     expect(after?.passwordHash).toBe(before?.passwordHash);
     expect(after?.mustChangePassword).toBe(before?.mustChangePassword);
@@ -276,28 +273,25 @@ describe('employee import', () => {
     const demo = await User.findOne({ ajeerCode: '9090412' }).lean();
     expect(demo?.name).toBe('Muhammad Arif');
 
-    // The Tehsil Zimmedar: an account in the Tehsil unit, no zimmedari.
+    // The Tehsil/Town Zimmedar: a zimmedar of the District (CTO 13 Nov 2026).
     const tehsil = await User.findOne({ ajeerCode: '880099' }).lean();
     expect(tehsil).toMatchObject({
-      role: 'tehsil',
-      unitPath: 'PK/INT_SINDH/SUKKUR/GHOTKI/GHOTKI_TOWN',
+      role: 'zimmedar',
+      zimmedari: 'tehsil_town',
+      unitPath: 'PK/INT_SINDH/SUKKUR/GHOTKI',
       mustChangePassword: true,
     });
-    expect(tehsil?.zimmedari).toBeUndefined();
-    // The held Ushar: no account, listed separately.
-    expect(await User.countDocuments({ ajeerCode: '880011' })).toBe(0);
-    expect(result.onHold.map((h) => h.reason)).toEqual(['NO_TEHSIL_PARENT']);
-    const out = join(dir, 'held-report.xlsx');
-    await writeEmployeeReport(result, out);
-    const rb = new ExcelJS.Workbook();
-    await rb.xlsx.readFile(out);
-    expect(rb.getWorksheet('Tehsil parent nahi')!.rowCount).toBe(2);
-    expect(rb.getWorksheet('Tehsil parent nahi')!.getRow(2).getCell(4).text).toBe('Other Town');
+    // The Ushar whose Town has no Tehsil Zimmedar now has his account too.
+    expect(await User.findOne({ ajeerCode: '880011' }).lean()).toMatchObject({
+      role: 'zimmedar',
+      unitPath: 'PK/INT_SINDH/SUKKUR/GHOTKI',
+    });
+    expect(result.onHold).toEqual([]);
   });
 
   it('is idempotent: a second run updates, creates nothing new', async () => {
     const result = await importEmployees(await readEmployeeSheet(file), { dryRun: false });
-    expect(result).toMatchObject({ created: 0, updated: 5, newUnits: [], mobileConflicts: [] });
+    expect(result).toMatchObject({ created: 0, updated: 6, newUnits: [], mobileConflicts: [] });
   });
 
   it('never overwrites a mobile on record; a different file number is reported', async () => {
@@ -375,13 +369,7 @@ describe('employee import', () => {
         to: 'zimmedar',
       }),
       expect.objectContaining({ ajeerCode: '880003', field: 'zimmedari', from: '', to: 'ushar' }),
-      // …and now sits in the Rohri Tehsil (its verified parent), not the District itself.
-      expect.objectContaining({
-        ajeerCode: '880003',
-        field: 'unit',
-        from: 'ROHRI',
-        to: 'ROHRI_TOWN',
-      }),
+      // …and stays on the Rohri District (no Tehsil level, CTO 13 Nov 2026): no unit change.
     ]);
     const auditsBefore = await AuditLog.countDocuments({ action: 'IMPORT_EMPLOYEES' });
     const result = await importEmployees(await readEmployeeSheet(again), {
@@ -410,7 +398,7 @@ describe('employee import', () => {
     const log = await AuditLog.findOne({ action: 'IMPORT_EMPLOYEES' }).sort({ at: -1 }).lean();
     expect(log).toMatchObject({
       actorAjeerCode: 'cli:test',
-      details: { file: 'hr-list.xlsx', created: 1, updated: 3, changes: 3 },
+      details: { file: 'hr-list.xlsx', created: 1, updated: 3, changes: 2 },
     });
     // Counts only: no names, codes or numbers in the audit entry.
     expect(JSON.stringify(log?.details)).not.toMatch(/Test|0300|880001/);
@@ -623,21 +611,23 @@ describe('unknown designations and held codes (CTO 7 Nov 2026)', () => {
     await wb.xlsx.writeFile(path);
 
     const result = await importEmployees(await readEmployeeSheet(path), { dryRun: false });
-    expect(result.created).toBe(2); // 881005 and the Ghotki Tehsil Zimmedar
+    // 881004/2 (no Town), 881005 and the Ghotki Tehsil/Town Zimmedar — nobody is held any more.
+    expect(result.created).toBe(3);
     expect(result.unknownDesignations.map((d) => [d.ajeerCode, d.zimmedari])).toEqual([
       ['881001', 'آفس ذمہ دار'],
       ['881002', 'آفس ذمہ دار'],
       ['881003', 'نگران مجلس'],
     ]);
-    expect(
-      await User.countDocuments({ ajeerCode: { $in: ['881001', '881002', '881003', '881004'] } }),
-    ).toBe(0);
+    expect(await User.countDocuments({ ajeerCode: { $in: ['881001', '881002', '881003'] } })).toBe(
+      0,
+    );
+    expect(await User.countDocuments({ ajeerCode: '881004' })).toBe(1); // no Town needed any more
 
     const plan = validateRows(await readEmployeeSheet(path));
     const codes = hrCodesFromPlan(plan);
-    // 881004/2 is no longer held (CTO 10 Nov 2026): login 881004, here on hold (no Town).
+    // 881004/2 is no longer held (CTO 10 Nov 2026) and needs no Town (CTO 13 Nov 2026).
     expect([...codes.held]).toEqual([]);
-    expect([...codes.onHold]).toEqual(['881004']);
+    expect([...codes.onHold]).toEqual([]);
     expect([...codes.rejected].sort()).toEqual(['881001', '881002', '881003']);
 
     const out = join(tmp, 'report.xlsx');
@@ -719,18 +709,18 @@ describe('HR units, Metropolitan separation and the Division Ushar mapping (CTO 
     const a = await User.findOne({ ajeerCode: '882001' }).lean();
     const b = await User.findOne({ ajeerCode: '882002' }).lean();
     expect(a!.unitPath).not.toBe(b!.unitPath);
-    // The Division Ushar row is a zimmedar in its Tehsil, a unit under the ordinary Sargodha District;
-    // the Tehsil Zimmedar is an account in that same Tehsil unit.
-    const tehsilUnit = real.newUnits.find((u) => u.level === 'tehsil')!;
-    expect(tehsilUnit.path.startsWith(`${a!.unitPath}/`)).toBe(true);
+    // The Division Ushar row and the Tehsil/Town Zimmedar: zimmedaran of the ordinary Sargodha
+    // District; no Tehsil unit (CTO 13 Nov 2026).
+    expect(real.newUnits.some((u) => u.level === 'tehsil')).toBe(false);
     expect(await User.findOne({ ajeerCode: '882004' }).lean()).toMatchObject({
       role: 'zimmedar',
       zimmedari: 'ushar',
-      unitPath: tehsilUnit.path,
+      unitPath: a!.unitPath,
     });
     expect(await User.findOne({ ajeerCode: '882005' }).lean()).toMatchObject({
-      role: 'tehsil',
-      unitPath: tehsilUnit.path,
+      role: 'zimmedar',
+      zimmedari: 'tehsil_town',
+      unitPath: a!.unitPath,
     });
     // A second run creates no unit.
     const again = await importEmployees(await readEmployeeSheet(path), { dryRun: false });

@@ -8,6 +8,7 @@ import {
   listDuplicates,
   listPending,
   mergeVillage,
+  resolveIssue,
   updateVillage,
 } from './manage.js';
 import {
@@ -19,6 +20,7 @@ import {
   updateVillageSchema,
   listVillagesQuery,
   mergeSchema,
+  resolveIssueSchema,
   villageIdParams,
 } from './schemas.js';
 import { addVillage, listVillages } from './service.js';
@@ -87,6 +89,13 @@ export function villagesRouter(): Router {
     const { id } = parse(villageIdParams, req.params);
     const { userId } = parse(assignSchema, req.body);
     res.json({ village: await assignVillage(currentUser(req), id, userId) });
+  });
+
+  /** A pool Gaon's problem handled by the District (CTO 13 Nov 2026). */
+  router.post('/:id/resolve-issue', supervisor, async (req, res) => {
+    const { id } = parse(villageIdParams, req.params);
+    const { kind } = parse(resolveIssueSchema, req.body);
+    res.json({ village: await resolveIssue(currentUser(req), id, kind) });
   });
 
   return router;

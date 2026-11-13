@@ -68,8 +68,8 @@ describe('official Gaon list: exact Ajeer Code, zimmedar-only assignment, except
     }).lean();
     other = { id: String(o!._id), code: o!.ajeerCode };
 
-    // The HR side: 880055 is rejected (designation not confirmed), 880066/3 is an Ushar without a
-    // Tehsil parent (on hold, login 880066).
+    // The HR side: 880055 is rejected (designation not confirmed); 880066/3 is an Ushar with no
+    // account yet (nobody is held since CTO 13 Nov 2026 — his Gaon wait in the pool).
     const hrRows: RawRow[] = [
       {
         row: 5,
@@ -107,11 +107,11 @@ describe('official Gaon list: exact Ajeer Code, zimmedar-only assignment, except
       row('District Ghotki', 'گوٹھ ضلعی سرکاری', '9040001'), // 6: a district user → pool
       row('District Ghotki', 'گوٹھ ڈویژنی سرکاری', '9030001'), // 7: a division user → pool
       row('District Ghotki', 'گوٹھ رکا ہوا', `${other.code}/2`), // 8: /2 → the code before "/"
-      row('District Ghotki', 'گوٹھ رکا ہوا دو', '880066/3'), // 9: a /3 code of an employee on hold
+      row('District Ghotki', 'گوٹھ رکا ہوا دو', '880066/3'), // 9: a /3 code with no account yet
       row('District Ghotki', 'گوٹھ مسترد', '880055'), // 10: employee rejected by HR
       row('District Ghotki', 'گوٹھ نامعلوم', '77777'), // 11: code not in the employees
       row('District Ghotki', 'گوٹھ صرف نام', '', 'Muhammad Arif'), // 12: name only → never matched
-      row('Larkana District', 'گوٹھ غلط ضلع', '9090412'), // 13: arif is not in Larkana
+      row('Larkana District', 'گوٹھ غلط ضلع', '9090412'), // 13: arif is not in Larkana → its pool
       row('District Ghotki', '', '9090412'), // 14: no name
       row('Atlantis District', 'گوٹھ کہیں نہیں', ''), // 15: district unknown
     ]) {
@@ -142,9 +142,10 @@ describe('official Gaon list: exact Ajeer Code, zimmedar-only assignment, except
     expect(dry).toMatchObject({ dryRun: true, rows: 13, duplicateRows: 2, assigned: 2 });
     expect(dry.districtPool.map((u) => u.row)).toEqual([6, 7]);
     expect(dry.heldCode).toEqual([]); // no /2, /3 hold since CTO 10 Nov 2026
-    expect(dry.employeeOnHold.map((u) => u.row)).toEqual([9]);
+    expect(dry.employeeOnHold).toEqual([]); // nobody is held (CTO 13 Nov 2026)
     expect(dry.notImportedEmployee.map((u) => u.row)).toEqual([10]);
     expect(dry.unmatchedZimmedar.map((u) => [u.row, u.problem])).toEqual([
+      [9, 'Ajeer code 880066 not found (import employees first)'],
       [11, 'Ajeer code 77777 not found (import employees first)'],
       [12, 'No Ajeer Code (zimmedar name kept for reference only)'],
     ]);
@@ -152,11 +153,11 @@ describe('official Gaon list: exact Ajeer Code, zimmedar-only assignment, except
     expect(dry.noName.map((u) => u.row)).toEqual([14]);
     expect(dry.unmatchedVillages.map((u) => u.row)).toEqual([15]);
     // The reference name travels with the exception rows (report only).
-    expect(dry.unmatchedZimmedar[1]!.zimmedarName).toBe('Muhammad Arif');
+    expect(dry.unmatchedZimmedar[2]!.zimmedarName).toBe('Muhammad Arif');
     expect(await Village.exists({ nameKey: 'سرکاری الف' })).toBeNull(); // nothing written
   });
 
-  it('a real run assigns only the exact zimmedar; supervisors, on-hold and rejected codes get nobody', async () => {
+  it('a real run assigns only the exact zimmedar; the rest wait in the District pool with the reason', async () => {
     await importVillages(await readVillageSheet(file), { dryRun: false, hr });
     const alif = await Village.find({ nameKey: 'سرکاری الف' }).lean();
     expect(alif).toHaveLength(1);
@@ -177,8 +178,20 @@ describe('official Gaon list: exact Ajeer Code, zimmedar-only assignment, except
       expect(v, nameKey).toMatchObject({ status: 'approved', districtCode: 'GHOTKI' });
       expect(v!.assignedTo, nameKey).toBeUndefined();
     }
-    // A district mismatch, a missing name and an unknown district are not imported at all.
-    expect(await Village.exists({ nameKey: 'غلط ضلع' })).toBeNull();
+    // Each pool Gaon says why it is there (CTO 13 Nov 2026).
+    const kinds = async (nameKey: string) =>
+      ((await Village.findOne({ nameKey }).lean())!.issues ?? []).map((i) => i.kind);
+    expect(await kinds('ضلعی سرکاری')).toEqual(['SUPERVISOR_CODE']);
+    expect(await kinds('مسترد')).toEqual(['NOT_IMPORTED_EMPLOYEE']);
+    expect(await kinds('نامعلوم')).toEqual(['ZIMMEDAR_NOT_FOUND']);
+    expect(await kinds('رکا ہوا دو')).toEqual(['ZIMMEDAR_NOT_FOUND']);
+    expect((await Village.findOne({ nameKey: 'سرکاری الف' }).lean())!.issues).toBeUndefined();
+    // A district mismatch goes to the pool of the file's District (Larkana), never assigned.
+    const wrong = await Village.findOne({ nameKey: 'غلط ضلع' }).lean();
+    expect(wrong).toMatchObject({ districtCode: 'LARKANA_DIST' });
+    expect(wrong!.assignedTo).toBeUndefined();
+    expect(wrong!.issues!.map((i) => i.kind)).toEqual(['DISTRICT_MISMATCH']);
+    // A missing name and an unknown district are not imported at all.
     expect(await Village.exists({ nameKey: 'کہیں نہیں' })).toBeNull();
     // Nothing of the village contact columns is stored.
     expect(JSON.stringify(await Village.find().lean())).not.toContain(CONTACT_PHONE);
@@ -192,10 +205,10 @@ describe('official Gaon list: exact Ajeer Code, zimmedar-only assignment, except
     const rowsOf = (name: string) => wb.getWorksheet(name)!.rowCount - 1;
     expect(rowsOf('District farq')).toBe(1);
     expect(rowsOf('Code 2, 3 - rukay hue')).toBe(0);
-    expect(rowsOf('Employee hold')).toBe(1);
+    expect(rowsOf('Employee hold')).toBe(0);
     expect(rowsOf('Employee import nahi hua')).toBe(1);
     expect(rowsOf('District pool')).toBe(2);
-    expect(rowsOf('Zimmedar nahi mila')).toBe(2);
+    expect(rowsOf('Zimmedar nahi mila')).toBe(3);
     const header = wb.getWorksheet('Zimmedar nahi mila')!.getRow(1).values as string[];
     expect(header).toContain('Naam (reference)');
   });

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { VILLAGE_ISSUES } from '../../models/village.js';
 
 export const listVillagesQuery = z.object({ q: z.string().trim().max(60).optional() });
 
@@ -43,3 +44,6 @@ export const donorsQuery = z.object({
     .regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/)
     .optional(),
 });
+
+/** POST /villages/:id/resolve-issue (CTO 13 Nov 2026). */
+export const resolveIssueSchema = z.object({ kind: z.enum(VILLAGE_ISSUES) });

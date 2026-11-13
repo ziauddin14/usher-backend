@@ -25,8 +25,9 @@ let file: string;
 
 /** One invented account per role; unit = the unit its dashboards open. */
 const ACCOUNTS: { code: string; role: Role; unit: string }[] = [
-  { code: '860001', role: 'zimmedar', unit: 'GHOTKI_TOWN' },
-  { code: '860090', role: 'tehsil', unit: 'GHOTKI_TOWN' },
+  // Every zimmedar (Ushar, Tehsil/Town) sits on the District — no Tehsil level (CTO 13 Nov 2026).
+  { code: '860001', role: 'zimmedar', unit: 'GHOTKI' },
+  { code: '860090', role: 'zimmedar', unit: 'GHOTKI' },
   { code: '860002', role: 'district', unit: 'GHOTKI' },
   { code: '860003', role: 'division', unit: 'SUKKUR' },
   { code: '860004', role: 'suba', unit: 'INT_SINDH' },
@@ -57,7 +58,7 @@ const ROWS = [
   ['860002/1', 'Invented District', 'District', 'Interior Sindh', 'Sukkur', 'Ghotki', ''],
   ['860003/1', 'Invented Division', 'Division', 'Interior Sindh', 'Sukkur', '', ''],
   ['860004/1', 'Invented Suba', 'Suba', 'Interior Sindh', '', '', ''],
-  // The Tehsil/Town Zimmedar of the zimmedar's Town (Phase 2: an account in its Tehsil unit).
+  // A Tehsil/Town Zimmedar: a zimmedar of the District (CTO 13 Nov 2026).
   [
     '860090/1',
     'Invented Tehsil',

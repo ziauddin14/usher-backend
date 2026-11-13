@@ -30,16 +30,14 @@ describe('seedDemo', () => {
     expect(await User.countDocuments({ role: 'zimmedar', unitCode: 'GHOTKI' })).toBe(10);
   });
 
-  it('has one demo Tehsil: Khairpur Ushar under it, its login, villages still on the District', async () => {
-    expect((await Unit.findOne({ code: 'KHAIRPUR_TOWN' }).lean())?.path).toBe(
-      'PK/INT_SINDH/SUKKUR/KHAIRPUR/KHAIRPUR_TOWN',
-    );
+  it('has no Tehsil level: the Tehsil/Town login is a zimmedar of its District (CTO 13 Nov 2026)', async () => {
+    expect(await Unit.countDocuments({ level: 'tehsil' })).toBe(0);
     expect(await User.findOne({ ajeerCode: '9050001' }).lean()).toMatchObject({
-      role: 'tehsil',
-      unitPath: 'PK/INT_SINDH/SUKKUR/KHAIRPUR/KHAIRPUR_TOWN',
+      role: 'zimmedar',
+      zimmedari: 'tehsil_town',
+      unitPath: 'PK/INT_SINDH/SUKKUR/KHAIRPUR',
     });
-    expect(await User.countDocuments({ role: 'zimmedar', unitCode: 'KHAIRPUR' })).toBe(0);
-    const khairpur = await User.find({ role: 'zimmedar', unitCode: 'KHAIRPUR_TOWN' }).lean();
+    const khairpur = await User.find({ role: 'zimmedar', unitCode: 'KHAIRPUR' }).lean();
     expect(khairpur.length).toBeGreaterThanOrEqual(2);
     expect(
       await Village.countDocuments({
@@ -47,7 +45,7 @@ describe('seedDemo', () => {
         unitPath: { $ne: 'PK/INT_SINDH/SUKKUR/KHAIRPUR' },
       }),
     ).toBe(0);
-    // Every Khairpur village is assigned to one of the Tehsil's Ushar Zimmedaran.
+    // Every Khairpur village is assigned to one of Khairpur's zimmedaran.
     const ids = new Set(khairpur.map((u) => String(u._id)));
     const villages = await Village.find({ districtCode: 'KHAIRPUR' }).lean();
     expect(villages.every((v) => ids.has(String(v.assignedTo)))).toBe(true);

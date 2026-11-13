@@ -149,8 +149,9 @@ export function requireRole(...roles: Role[]): RequestHandler {
  */
 export const SUPERVISOR_ROLES: Role[] = ['district', 'division', 'suba', 'pakistan'];
 
-/** Read-only dashboards: every supervisor plus the Tehsil Zimmedar (own Tehsil only, by scope). */
-export const DASHBOARD_ROLES: Role[] = ['tehsil', ...SUPERVISOR_ROLES];
+/** Dashboards: the supervisors only. No Tehsil dashboard since CTO 13 Nov 2026 (a Tehsil/Town
+ * Zimmedar is a zimmedar). */
+export const DASHBOARD_ROLES: Role[] = [...SUPERVISOR_ROLES];
 
 export function currentUser(req: Request): AuthUser {
   if (!req.user) throw new AppError(401, 'UNAUTHENTICATED', 'Login required');

@@ -100,7 +100,7 @@ describe('seedHistory (invented jadwal history, rolling 12 months → yesterday)
   });
 
   it('never adds days to a finished month that already has records (older generators)', async () => {
-    const z = await User.findOne({ role: 'zimmedar', unitCode: 'KHAIRPUR_TOWN' }) // the demo Tehsil's Ushar
+    const z = await User.findOne({ role: 'zimmedar', unitCode: 'KHAIRPUR', zimmedari: 'ushar' }) // a Khairpur Ushar
       .sort({ ajeerCode: 1 })
       .lean();
     // An October seeded earlier by another generator: one day only.
