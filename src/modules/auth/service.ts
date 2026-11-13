@@ -9,6 +9,7 @@ import { PasswordResetRequest } from '../../models/password-reset-request.js';
 import { Unit } from '../../models/unit.js';
 import { User } from '../../models/user.js';
 import { INITIAL_PASSWORD } from './schemas.js';
+import { resetTestDataAtLogin } from '../test-user/service.js';
 
 export const BCRYPT_COST = 10;
 
@@ -55,6 +56,7 @@ export async function publicUser(user: AuthUser): Promise<PublicUser> {
     },
     mustChangePassword: user.mustChangePassword,
     ...(user.department ? { department: user.department } : {}),
+    ...(user.isTest ? { isTest: true } : {}),
   };
 }
 
@@ -95,6 +97,9 @@ export async function login(ajeerCode: string, password: string, ip: string | un
     details: { ip },
   });
 
+  // A test account starts each day clean (CTO 13 Nov 2026).
+  await resetTestDataAtLogin(user);
+
   const authUser: AuthUser = {
     id: String(user._id),
     ajeerCode: user.ajeerCode,
@@ -107,6 +112,7 @@ export async function login(ajeerCode: string, password: string, ip: string | un
     mustChangePassword: user.mustChangePassword,
     sessionVersion: user.sessionVersion ?? 0,
     ...(user.department ? { department: user.department } : {}),
+    ...(user.isTest ? { isTest: true } : {}),
   };
   return authUser;
 }

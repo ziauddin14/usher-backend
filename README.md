@@ -350,3 +350,17 @@ days it was done. Counted from submitted amli jadwals (earlier days too). The zi
   month), written and received in the period (naqd and jins by item / unit).
 - Demo seed: 9000004 keeps the back-date window free of history and has invented donors in every
   Gaon (for the end-to-end tests).
+
+## Test-mode Ushar Zimmedar (CTO 13 Nov 2026)
+
+- `pnpm provision:test-user --dry-run`, then `--operator "<who>" --confirm=ushr_live`: creates the
+  sandbox units **TEST → TEST_SUBA → TEST_DIV → TEST_DIST** (outside PK), the account **999999001**
+  (`isTest`, initial password `demo1234`, must be changed at first login), three test Gaon with nine
+  invented donors and a local zimmedar. Idempotent; touches nothing outside TEST; audited.
+- Every report, dashboard, ERP view and import is scoped under PK, so nothing the test account does
+  is counted anywhere. The national unit is always looked up by its code `PK` (HR import root, Pakistan
+  Admin provisioning), never by level alone.
+- His test data before today is cleared at each login; `POST /me/test-reset` (the test account only,
+  else 403) clears all of it — jadwals, niyyat, donors he added, meetings on the test donors, Gaon he
+  added. Audit entries are kept.
+- `pnpm seed --test-user` adds him to a demo database (end-to-end tests; no forced password change).

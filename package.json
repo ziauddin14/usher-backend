@@ -24,6 +24,7 @@
     "import:mobiles": "tsx --env-file-if-exists=.env scripts/import-mobiles.ts",
     "inspect:file": "tsx scripts/inspect-import-file.ts",
     "provision:pakistan-admin": "tsx --env-file-if-exists=.env scripts/provision-pakistan-admin.ts",
+    "provision:test-user": "tsx --env-file-if-exists=.env scripts/provision-test-user.ts",
     "pakistan-admin:status": "tsx --env-file-if-exists=.env scripts/pakistan-admin-status.ts"
   },
   "dependencies": {

@@ -80,6 +80,11 @@ const userSchema = new Schema(
       ),
     },
     isDemo: { type: Boolean, default: false },
+    /**
+     * Test-mode zimmedar (CTO 13 Nov 2026): lives in the TEST sandbox unit (outside PK, so no report,
+     * dashboard, ERP or import ever counts him); his old test data is cleared at every login.
+     */
+    isTest: { type: Boolean, default: false },
   },
   { timestamps: true },
 );
