@@ -4,7 +4,14 @@ import { parse } from '../../lib/errors.js';
 import { dashExport } from './export.js';
 import { exportQuery, monthQuery, periodQuery, unitParams, userParams } from './schemas.js';
 import { unitErp } from '../erp/service.js';
-import { childrenTable, overview, unitVillages, zimmedarDays, zimmedaranTable } from './service.js';
+import {
+  childrenTable,
+  overview,
+  unitTasks,
+  unitVillages,
+  zimmedarDays,
+  zimmedaranTable,
+} from './service.js';
 
 /**
  * Read-only dashboards for supervisors and Tehsil Zimmedaran (each in their own scope, by unit
@@ -36,6 +43,13 @@ export function dashRouter(): Router {
   router.get('/units/:code/erp', async (req, res) => {
     const { code } = parse(unitParams, req.params);
     res.json(await unitErp(currentUser(req), code, parse(periodQuery, req.query)));
+  });
+
+  /** Meeting-task and other-work counts of the unit in the period (CTO 13 Nov 2026). */
+  router.get('/units/:code/tasks', async (req, res) => {
+    const { code } = parse(unitParams, req.params);
+    const { period, date, from } = parse(periodQuery, req.query);
+    res.json(await unitTasks(currentUser(req), code, period, date, from));
   });
 
   router.get('/units/:code/villages', async (req, res) => {

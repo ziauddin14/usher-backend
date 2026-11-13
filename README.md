@@ -315,3 +315,11 @@ cancelled (never deleted).
 - Reward until the reward work: a wusooli entry without a mad counts in `rewardWusooli` when naqd,
   never when jins; GSB as before. Entries with a mad (saved before) keep the category rule, and
   submitted jadwals keep their stored totals.
+
+## Task counts in reports (CTO 13 Nov 2026)
+
+`GET /me/tasks?period=…` (own) and `GET /dash/units/:code/tasks?period=…` (unit, scope) → for every
+meeting task how often it was ticked (`times`; per donor, the old-donor list without names once) and,
+for a count task, the numbers added up (`units`, e.g. toray / gattu bags); for every other work the
+days it was done. Counted from submitted amli jadwals (earlier days too). The zimmedar's Excel gets a
+"کام" sheet; the dashboard zimmedaran / children Excel a "Kaam" sheet.

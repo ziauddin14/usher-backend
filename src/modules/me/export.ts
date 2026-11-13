@@ -1,5 +1,6 @@
 // GET /me/export.xlsx — one row per day with Urdu headers, right-to-left sheet, totals row.
 import ExcelJS from 'exceljs';
+import { addTaskSheet, type TaskCounts } from '../reports/tasks.js';
 import type { Kpis } from './service.js';
 
 /** Urdu text of the export (backend file, not a UI component). */
@@ -36,6 +37,8 @@ export async function buildMeWorkbook(input: {
     day: { entryType: string; totals?: Partial<Record<keyof Kpis, number | null>> | null } | null;
   }[];
   totals: Kpis;
+  /** Task counts of the same days → a "کام" sheet. */
+  tasks?: TaskCounts;
 }): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('خلاصہ', {
@@ -70,5 +73,6 @@ export async function buildMeWorkbook(input: {
       ws.getColumn(c.key).numFmt = '#,##0';
     }
   }
+  if (input.tasks) addTaskSheet(wb, input.tasks, true);
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
