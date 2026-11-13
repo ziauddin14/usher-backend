@@ -423,7 +423,7 @@ export async function unitVillages(caller: AuthUser, code: string, month?: strin
     : { unitPath: pathRegex(unit.path) };
   const [villages, visited] = await Promise.all([
     Village.find({ ...villageFilter, status: { $in: ['approved', 'pending'] } })
-      .select('name status assignedTo districtCode')
+      .select('name status assignedTo districtCode issues')
       .sort({ nameKey: 1 })
       .lean(),
     Jadwal.aggregate<{ _id: Types.ObjectId }>([
@@ -439,6 +439,13 @@ export async function unitVillages(caller: AuthUser, code: string, month?: strin
     status: v.status,
     districtCode: v.districtCode,
     visited: seen.has(String(v._id)),
+    // Why a pool Gaon sits there, and the suggested fix (CTO 13 Nov 2026).
+    issues: (v.issues ?? []).map((i) => ({
+      kind: i.kind,
+      detail: i.detail ?? null,
+      suggestionId: i.suggestionId ? String(i.suggestionId) : null,
+      suggestionName: i.suggestionName ?? null,
+    })),
   });
   return {
     unit,

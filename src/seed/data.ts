@@ -88,7 +88,6 @@ const SINDH_DIVISIONS: [code: string, name: string, nameUr: string, districts: D
  * Demo Tehsil (Phase 2, invented): Khairpur's Ushar Zimmedaran sit under one Tehsil / Town, with
  * a Tehsil Zimmedar login. Every other district keeps its zimmedaran on the district itself.
  */
-export const DEMO_TEHSIL = { code: 'KHAIRPUR_TOWN', district: 'KHAIRPUR' } as const;
 
 /**
  * Pakistan → Suba → Division → District (→ the one demo Tehsil). Division and district can share a
@@ -126,13 +125,6 @@ export function seedUnits(): SeedUnit[] {
       });
     }
   }
-  units.push({
-    code: DEMO_TEHSIL.code,
-    name: 'Khairpur Town',
-    nameUr: 'خیرپور ٹاؤن',
-    level: 'tehsil',
-    parentCode: DEMO_TEHSIL.district,
-  });
   return units;
 }
 
@@ -184,11 +176,13 @@ export const DEMO_USERS: SeedUser[] = [
     unitCode: 'GHOTKI',
   },
   {
+    // CTO 13 Nov 2026: a Tehsil/Town Zimmedar is a zimmedar of the District (no Tehsil level).
     ajeerCode: '9050001',
     name: 'Muhammad Naeem',
     nameUr: 'محمد نعیم',
-    role: 'tehsil',
-    unitCode: DEMO_TEHSIL.code,
+    role: 'zimmedar',
+    zimmedari: 'tehsil_town',
+    unitCode: 'KHAIRPUR',
   },
 ];
 
@@ -288,7 +282,7 @@ export function seedZimmedaran(districtCodes: string[]): SeedUser[] {
         nameUr: `${fu} ${lu}`,
         role: 'zimmedar',
         zimmedari,
-        unitCode: unitCode === DEMO_TEHSIL.district ? DEMO_TEHSIL.code : unitCode,
+        unitCode,
       });
     }
   }

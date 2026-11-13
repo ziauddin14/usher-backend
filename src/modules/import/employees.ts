@@ -55,17 +55,19 @@ export const ZIMMEDARI_MAP: Record<string, { role: Role; zimmedari?: Zimmedari }
       [
         ['Ushar', { role: 'zimmedar', zimmedari: 'ushar' }],
         ['Ushar Zimmedar', { role: 'zimmedar', zimmedari: 'ushar' }],
-        // CTO 9 Nov 2026: the Tehsil/Town Zimmedar is the Tehsil role (its own unit level).
-        ['Tehsil-Town', { role: 'tehsil' }],
-        ['Tehsil', { role: 'tehsil' }],
-        ['Town', { role: 'tehsil' }],
+        // CTO 13 Nov 2026 (user management): a Tehsil/Town Zimmedar does the same field work as an
+        // Ushar Zimmedar and reports to the District — a zimmedar, designation "tehsil_town". There
+        // is no Tehsil level any more (it replaces the Tehsil role of 9 Nov 2026).
+        ['Tehsil-Town', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
+        ['Tehsil', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
+        ['Town', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
         ['Event', { role: 'zimmedar', zimmedari: 'event' }],
         ['District', { role: 'district' }],
         ['Division', { role: 'division' }],
         ['Suba', { role: 'suba' }],
         ['اسسٹینٹ عشر ذمہ دار', { role: 'zimmedar', zimmedari: 'ushar' }],
         ['عشر ذمہ دار', { role: 'zimmedar', zimmedari: 'ushar' }],
-        ['ٹاؤن /تحصیل ذمہ دار', { role: 'tehsil' }],
+        ['ٹاؤن /تحصیل ذمہ دار', { role: 'zimmedar', zimmedari: 'tehsil_town' }],
         ['ایونٹ عشر ذمہ دار', { role: 'zimmedar', zimmedari: 'event' }],
         ['ڈسٹرکٹ ذمہ دار', { role: 'district' }],
         ['سرکاری ڈویژن ذمہ دار', { role: 'division' }],
@@ -281,9 +283,6 @@ export function validateRows(rows: RawRow[]): ImportPlan {
     ) {
       problems.push('District is missing');
     }
-    if (mapped?.role === 'tehsil' && !clean(values.town)) {
-      problems.push('Town is missing (the Tehsil unit of a Tehsil/Town Zimmedar)');
-    }
 
     let mobile: string | undefined;
     if (values.mobile) {
@@ -327,32 +326,10 @@ export function validateRows(rows: RawRow[]): ImportPlan {
         : {}),
     });
   }
-  // Hold (CTO 9 Nov 2026), decided only from verified HR data — never inferred: an Ushar Zimmedar
-  // is imported only when the HR file has an importable Tehsil/Town Zimmedar for exactly the same
-  // District + Town (its Tehsil unit); otherwise held (no fallback, no fabricated Tehsil).
-  // District as the unit resolver compares it (level words ignored); Town exactly as written
-  // (only case, spaces and punctuation ignored).
-  const placeKey = (d?: string, t?: string) => `${unitKey(d ?? '')}|${headerKey(t ?? '')}`;
-  const tehsilPlaces = new Set(
-    valid.filter((v) => v.role === 'tehsil' && v.town).map((v) => placeKey(v.district, v.town)),
-  );
+  // No hold any more (CTO 13 Nov 2026): the Tehsil-parent rule of 9 Nov 2026 is gone with the
+  // Tehsil level — every Ushar and Tehsil/Town Zimmedar is imported under the District. `onHold`
+  // stays in the result (always empty) so older reports keep their shape.
   const onHold: HeldEmployee[] = [];
-  const importable: ValidRow[] = [];
-  for (const v of valid) {
-    const where = {
-      suba: v.suba,
-      division: v.division ?? '',
-      district: v.district ?? '',
-      town: v.town ?? '',
-    };
-    if (v.role === 'zimmedar' && (!v.town || !tehsilPlaces.has(placeKey(v.district, v.town)))) {
-      onHold.push({ row: v.row, ajeerCode: v.ajeerCode, reason: 'NO_TEHSIL_PARENT', ...where });
-    } else {
-      importable.push(v);
-    }
-  }
-  valid.length = 0;
-  valid.push(...importable);
   const sameCode = [...byCode]
     .filter(([, list]) => list.length > 1)
     .map(([ajeerCode, list]) => ({
@@ -535,10 +512,8 @@ class UnitResolver {
   }
 
   /**
-   * The unit a user belongs to: a supervisor's own unit; a Tehsil Zimmedar's Tehsil; an Ushar
-   * Zimmedar's Tehsil (importable ones always have a verified Tehsil parent — validateRows holds the
-   * others). Without a Town the District is returned (used for held rows and official records,
-   * which never create a Tehsil).
+   * The unit a user belongs to: a supervisor's own unit; every zimmedar (Ushar, Tehsil/Town, Event)
+   * the District — no Tehsil unit is ever created (CTO 13 Nov 2026).
    */
   unitFor(row: ValidRow): UnitRef {
     const suba = this.resolve(row.suba, 'suba', this.root(), [row.suba]);
@@ -550,14 +525,6 @@ class UnitResolver {
       row.division!,
       row.district!,
     ]);
-    if ((row.role === 'tehsil' || row.role === 'zimmedar') && row.town) {
-      return this.resolve(row.town, 'tehsil', district, [
-        row.suba,
-        row.division!,
-        row.district!,
-        row.town,
-      ]);
-    }
     return district;
   }
 }

@@ -10,7 +10,7 @@ import { assertInScope, districtPathOf, scopeFilter } from '../../lib/scope.js';
 import { looseVillageKey, villageNameKey } from '../../lib/text.js';
 import { Unit } from '../../models/unit.js';
 import { User } from '../../models/user.js';
-import { Village } from '../../models/village.js';
+import { Village, type VillageIssueKind } from '../../models/village.js';
 
 const LIVE: ('approved' | 'pending')[] = ['approved', 'pending'];
 
@@ -166,6 +166,8 @@ export async function assignVillage(caller: AuthUser, id: string, userId: string
   const from = village.assignedTo ? String(village.assignedTo) : null;
   if (from === String(target._id)) return view(village);
   village.assignedTo = target._id;
+  // Assigned: whatever kept it in the pool is solved (CTO 13 Nov 2026).
+  village.set('issues', undefined);
   await village.save();
   const previous = from ? await User.findById(from).select('ajeerCode').lean() : null;
   await audit({
@@ -322,6 +324,9 @@ export async function updateVillage(
       village.nameKey = nameKey;
     }
     village.name = name;
+    // A corrected name answers a "similar name" issue (CTO 13 Nov 2026).
+    const rest = (village.issues ?? []).filter((i) => i.kind !== 'SIMILAR_NAME');
+    village.set('issues', rest.length ? rest : undefined);
   }
   if (input.tehsil !== undefined) {
     const tehsil = input.tehsil.replace(/\s+/g, ' ').trim();
@@ -366,4 +371,27 @@ export async function listDuplicates(caller: AuthUser, code?: string) {
     groups.set(key, [...(groups.get(key) ?? []), v]);
   }
   return [...groups.values()].filter((g) => g.length > 1).map((g) => g.map(view));
+}
+
+/**
+ * POST /villages/:id/resolve-issue { kind } — the District marks one problem of a pool Gaon as
+ * handled ("theek hai": e.g. the similar name is a different Gaon). Audited.
+ */
+export async function resolveIssue(caller: AuthUser, id: string, kind: VillageIssueKind) {
+  const village = await villageInScope(caller, id);
+  const before = village.issues ?? [];
+  if (!before.some((i) => i.kind === kind)) return view(village);
+  const rest = before.filter((i) => i.kind !== kind);
+  village.set('issues', rest.length ? rest : undefined);
+  await village.save();
+  await audit({
+    action: 'VILLAGE_ISSUE_RESOLVE',
+    actorId: caller.id,
+    actorAjeerCode: caller.ajeerCode,
+    targetType: 'village',
+    targetId: String(village._id),
+    unitPath: village.unitPath,
+    details: { name: village.name, kind },
+  });
+  return view(village);
 }

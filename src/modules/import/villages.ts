@@ -13,7 +13,8 @@ import { unitKey } from '../../lib/unit-name.js';
 import { headerKey, loadWorkbook, readRows } from '../../lib/xlsx.js';
 import { Unit } from '../../models/unit.js';
 import { User } from '../../models/user.js';
-import { Village, type VillageDoc } from '../../models/village.js';
+import { Village, type VillageDoc, type VillageIssueKind } from '../../models/village.js';
+import { looseVillageKey } from '../../lib/text.js';
 
 /** Spec headers + the department export (Sheet1 of the village list). */
 const COLUMNS = {
@@ -141,6 +142,8 @@ interface Group {
   problem?: UnmatchedRow;
   /** Listed under a supervisor: goes to the district pool if no row names a zimmedar. */
   pool?: UnmatchedRow;
+  /** Why it will sit in the pool, by kind (first detail kept) — shown to the District. */
+  issues: Map<VillageIssueKind, string>;
 }
 
 /**
@@ -257,13 +260,16 @@ export async function importVillages(
       !userDistrict &&
       fileDistrict &&
       !(fileDistrict.path === user.unitPath || fileDistrict.path.startsWith(`${user.unitPath}/`));
+    // CTO 13 Nov 2026: a Gaon whose District is known goes to that District's pool with the issue,
+    // instead of being left out.
+    let mismatch: string | undefined;
     if ((userDistrict && fileDistrict && userDistrict.path !== fileDistrict.path) || outsideUser) {
+      mismatch = `File ka District "${districtText}", zimmedar ${code} ka District ${user!.unitCode}`;
       districtMismatch.push(
         report(
-          `District "${districtText}" is not the district of Ajeer code ${code} (${user!.unitCode}) — not imported`,
+          `District "${districtText}" is not the district of Ajeer code ${code} (${user!.unitCode}) — into this District's pool`,
         ),
       );
-      continue;
     }
     // An employee on hold is not in the database, but their verified HR District still decides
     // "District farq" — the approved exception rows stay excluded (CTO 7 / 9 Nov 2026).
@@ -296,13 +302,17 @@ export async function importVillages(
     let assignee: { id: string; label: string } | undefined;
     let zimmedarProblem: string | undefined;
     let poolReason: string | undefined;
-    if (held) {
+    let notImported = false;
+    if (mismatch) {
+      // Kept in the file's District, never assigned across Districts.
+    } else if (held) {
       heldCode.push(report(`Ajeer code ${codeFull || code} is held (/2, /3) — CTO decides`));
     } else if (onHoldCode) {
       employeeOnHold.push(
         report(`Ajeer code ${code} is on hold in the HR import (no verified Tehsil parent)`),
       );
     } else if (rejected) {
+      notImported = true;
       notImportedEmployee.push(
         report(`Ajeer code ${code} was not imported from the HR file (see its report)`),
       );
@@ -326,7 +336,15 @@ export async function importVillages(
     let group = groups.get(gk);
     if (group) duplicateRows += 1;
     else {
-      group = { row, name, nameKey, ...(tehsil ? { tehsil } : {}), district, votes: new Map() };
+      group = {
+        row,
+        name,
+        nameKey,
+        ...(tehsil ? { tehsil } : {}),
+        district,
+        votes: new Map(),
+        issues: new Map(),
+      };
       groups.set(gk, group);
     }
     if (assignee) {
@@ -337,6 +355,15 @@ export async function importVillages(
     } else if (zimmedarProblem && !group.problem) {
       group.problem = report(zimmedarProblem);
     }
+    const issue = (kind: VillageIssueKind, detail: string) => {
+      if (!group.issues.has(kind)) group.issues.set(kind, detail);
+    };
+    if (mismatch) issue('DISTRICT_MISMATCH', mismatch);
+    else if (notImported)
+      issue('NOT_IMPORTED_EMPLOYEE', `Ajeer code ${code} HR import mein nahi aaya`);
+    else if (poolReason)
+      issue('SUPERVISOR_CODE', `Ajeer code ${code} zimmedar nahi (${user?.role ?? ''})`);
+    else if (zimmedarProblem) issue('ZIMMEDAR_NOT_FOUND', zimmedarProblem);
   }
 
   // 3. One zimmedar per village: the one most rows name; report villages named for several.
@@ -406,6 +433,33 @@ export async function importVillages(
     return { plan: p, match };
   });
 
+  // A pool Gaon with almost the same name as a live Gaon of its District: the District decides.
+  const liveByDistrict = new Map<string, { id: Types.ObjectId; name: string; loose: string }[]>();
+  for (const v of liveById.values()) {
+    const list = liveByDistrict.get(v.unitPath) ?? [];
+    list.push({ id: v._id, name: v.name, loose: looseVillageKey(v.name) });
+    liveByDistrict.set(v.unitPath, list);
+  }
+  const similarOf = (p: (typeof plans)[number], self?: Types.ObjectId) => {
+    const lk = looseVillageKey(p.name);
+    if (lk.length < 4) return undefined;
+    return (liveByDistrict.get(p.district.path) ?? []).find(
+      (v) => (!self || !v.id.equals(self)) && v.loose !== lk && closeEnough(v.loose, lk),
+    );
+  };
+  const issuesOf = (p: (typeof plans)[number], self?: Types.ObjectId) => {
+    if (p.assignedTo) return [];
+    const list: {
+      kind: VillageIssueKind;
+      detail?: string;
+      suggestionId?: Types.ObjectId;
+      suggestionName?: string;
+    }[] = [...p.issues].map(([kind, detail]) => ({ kind, detail }));
+    const like = similarOf(p, self);
+    if (like) list.push({ kind: 'SIMILAR_NAME', suggestionId: like.id, suggestionName: like.name });
+    return list;
+  };
+
   const result: VillageImportResult = {
     dryRun,
     rows: rows.length,
@@ -436,6 +490,7 @@ export async function importVillages(
       const id = String(match._id);
       if (seen.has(id)) continue;
       seen.add(id);
+      const issues = issuesOf(p, match._id);
       ops.push(
         {
           updateOne: {
@@ -449,13 +504,27 @@ export async function importVillages(
             },
           },
         },
-        // Only a village nobody is responsible for gets the file's zimmedar.
+        // Only a village nobody is responsible for gets the file's zimmedar (its issues then go).
         ...(p.assignedTo
           ? [
               {
                 updateOne: {
                   filter: { _id: match._id, assignedTo: null },
-                  update: { $set: { assignedTo: new Types.ObjectId(p.assignedTo) } },
+                  update: {
+                    $set: { assignedTo: new Types.ObjectId(p.assignedTo) },
+                    $unset: { issues: '' },
+                  },
+                },
+              },
+            ]
+          : []),
+        // A pool village (still nobody's) shows why (CTO 13 Nov 2026).
+        ...(issues.length
+          ? [
+              {
+                updateOne: {
+                  filter: { _id: match._id, assignedTo: null },
+                  update: { $set: { issues } },
                 },
               },
             ]
@@ -476,6 +545,8 @@ export async function importVillages(
           status: 'approved' as const,
           approvedAt: startedAt,
           ...(p.assignedTo ? { assignedTo: new Types.ObjectId(p.assignedTo) } : {}),
+          // The subdocument array type of the model; plain objects are what MongoDB stores.
+          ...(issuesOf(p).length ? { issues: issuesOf(p) as unknown as VillageDoc['issues'] } : {}),
           source: {
             kind: 'import' as const,
             ...(source ? { file: source.file } : {}),
@@ -565,4 +636,23 @@ export async function writeVillageReport(result: VillageImportResult, file: stri
     result.formerNameMatches.map((m) => [m.inFile, m.district, m.village]),
   );
   await wb.xlsx.writeFile(file);
+}
+
+/** Close spellings (loose keys): one edit apart, or two for long names. */
+function closeEnough(a: string, b: string): boolean {
+  if (Math.abs(a.length - b.length) > 2) return false;
+  const max = Math.min(a.length, b.length) >= 8 ? 2 : 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i += 1) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j += 1) {
+      cur[j] = Math.min(
+        prev[j]! + 1,
+        cur[j - 1]! + 1,
+        prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+    prev = cur;
+  }
+  return prev[b.length]! <= max;
 }
