@@ -16,7 +16,7 @@ import { importVillages, readVillageSheet } from '../import/villages.js';
 // that cannot be assigned waits in the District pool with its problem and the way to fix it.
 const app = createApp();
 let district: string; // 9040001 Ghotki
-let larkana: string;
+let admin: string; // 9100001 — fixes the pool (CTO 14 Nov 2026)
 let dir: string;
 let existing: { id: string; name: string };
 
@@ -48,7 +48,7 @@ beforeAll(async () => {
     passwordHash: await bcrypt.default.hash('demo1234', 4),
     mustChangePassword: false,
   });
-  larkana = await loginCookie(app, '40002');
+  admin = await loginCookie(app, '9100001');
   const v = await Village.findOne({ districtCode: 'GHOTKI', status: 'approved' })
     .sort({ nameKey: -1 })
     .lean();
@@ -94,10 +94,10 @@ describe('District pool: problems and fixes', () => {
     const like = `${existing.name}ی`;
     const v = await Village.findOne({ name: like }).lean();
     const id = String(v!._id);
-    await as(larkana).post(`/villages/${id}/resolve-issue`, { kind: 'SIMILAR_NAME' }).expect(404);
-    await as(district).post(`/villages/${id}/resolve-issue`, { kind: 'NOPE' }).expect(400);
+    await as(district).post(`/villages/${id}/resolve-issue`, { kind: 'SIMILAR_NAME' }).expect(403);
+    await as(admin).post(`/villages/${id}/resolve-issue`, { kind: 'NOPE' }).expect(400);
 
-    await as(district)
+    await as(admin)
       .post(`/villages/${id}/resolve-issue`, { kind: 'ZIMMEDAR_NOT_FOUND' })
       .expect(200);
     expect((await Village.findById(id).lean())!.issues!.map((i) => i.kind)).toEqual([
@@ -107,7 +107,7 @@ describe('District pool: problems and fixes', () => {
       1,
     );
 
-    await as(district)
+    await as(admin)
       .patch(`/villages/${id}`, { name: `${existing.name} نیا` })
       .expect(200);
     expect((await Village.findById(id).lean())!.issues).toBeUndefined();
@@ -115,7 +115,7 @@ describe('District pool: problems and fixes', () => {
     // Assigning a pool Gaon clears whatever kept it there.
     await Village.updateOne({ _id: id }, { $set: { issues: [{ kind: 'ZIMMEDAR_NOT_FOUND' }] } });
     const z = await User.findOne({ role: 'zimmedar', unitCode: 'GHOTKI' }).lean();
-    await as(district)
+    await as(admin)
       .post(`/villages/${id}/assign`, { userId: String(z!._id) })
       .expect(200);
     expect((await Village.findById(id).lean())!.issues).toBeUndefined();

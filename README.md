@@ -51,7 +51,7 @@ has no static IP).
 - `ushr_demo` holds only invented seed data; `ushr_live` only the real imports. The seed refuses a
   live database; imports write only to `LIVE_MONGODB_URI`; admin CLIs need `--db` and `--confirm`.
 - Real files go in `private/` (git-ignored) and are never committed. Never commit `.env`.
-- Demo logins (password `demo1234`): 9090412 zimmedar, 9050001 zimmedar with the Tehsil/Town
+- Demo logins (password `demo1234`): 9100001 Admin, 9090412 zimmedar, 9050001 zimmedar with the Tehsil/Town
   designation (District Khairpur), 9040001 district, 9030001 division, 9020001 suba, 9010001
   pakistan — all invented.
 
@@ -363,3 +363,28 @@ days it was done. Counted from submitted amli jadwals (earlier days too). The zi
   else 403) clears all of it — jadwals, niyyat, donors he added, meetings on the test donors, Gaon he
   added. Audit entries are kept.
 - `pnpm seed --test-user` adds him to a demo database (end-to-end tests; no forced password change).
+
+## Admin: the only role that changes data (CTO 14 Nov 2026)
+
+- New role `admin` (Pakistan level, unit `PK`). `EDITOR_ROLES = ['admin']` in `src/lib/auth.ts`.
+  District, Division, Suba and Pakistan (`DASHBOARD_ROLES`) only view dashboards and download
+  reports (Excel, PDF via print); every change they try answers 403.
+- The Admin does: users (`POST /users` a new zimmedar, reset requests, password reset,
+  activate / deactivate), Gaon management (`/villages/manage`, assign, rename, merge, approve,
+  `resolve-issue`), jadwal reopen, official-duty decisions (`DUTY_APPROVER` → admin) and the ERP
+  upload (`/erp`).
+- `POST /jadwals/:id/correct` (`src/modules/jadwals/correct.ts`): direct correction of a submitted
+  day with a reason (5–300 letters) — travel numbers, a visit's Gaon (only a visit without donor
+  records, same District), a visit removed, an atiyat amount / quantity or the entry removed, GSB,
+  ijtima and mashwara participants. Totals and the day's niyyat records are recalculated; the day
+  stays submitted; `jadwal.corrections` and `JADWAL_CORRECT` (changes, totals before / after).
+  Donor meetings are corrected by reopening the day.
+- `POST /users` `{ ajeerCode, name, nameUr?, fatherName?, mobile?, districtCode, zimmedari:
+  ushar | tehsil_town }` → a zimmedar with `demo1234` and a forced change; an existing Ajeer Code is
+  409 (never changed). `GET /users/districts` lists the Districts for the form. Audit `USER_CREATE`.
+- `GET /audit?actor=&action=&from=&to=&target=&logins=1&page=` (Admin): newest first, 50 per page,
+  with the actor's name; logins and own password / mobile changes only with `logins=1`.
+  `GET /audit/admins` lists the Admins.
+- Accounts: `pnpm provision:pakistan-admin <ajeerCode> --name "<name>" --admin --nomination <ref>
+  --approval <ref> --operator "<who>" --db live --confirm=ushr_live` (creates only; audited
+  `USER_PROVISION`). Demo Admin: 9100001 (invented).

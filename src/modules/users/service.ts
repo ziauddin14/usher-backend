@@ -1,6 +1,6 @@
 import { Types } from 'mongoose';
 import { audit } from '../../lib/audit.js';
-import { type AuthUser, SUPERVISOR_ROLES } from '../../lib/auth.js';
+import { type AuthUser, EDITOR_ROLES } from '../../lib/auth.js';
 import { connectDb } from '../../lib/db.js';
 import { AppError } from '../../lib/errors.js';
 import { maskMobile } from '../../lib/mobile.js';
@@ -12,7 +12,7 @@ import { resetToInitialPassword } from '../auth/service.js';
 
 /** Password reset and activate / deactivate: supervisors only — never a Tehsil (CTO 9 Nov 2026). */
 function assertManager(caller: AuthUser): void {
-  if (!SUPERVISOR_ROLES.includes(caller.role)) {
+  if (!EDITOR_ROLES.includes(caller.role)) {
     throw new AppError(403, 'FORBIDDEN', 'Not allowed for this role');
   }
 }

@@ -2,7 +2,9 @@
 //
 // pnpm provision:pakistan-admin <ajeerCode> --name "<name>" [--name-ur "<Urdu name>"]
 //      --nomination <reference> --approval <reference> --operator "<Central IT operator>"
-//      [--central-it] --db demo|live --confirm=<database name>
+//      [--central-it] [--admin] --db demo|live --confirm=<database name>
+//
+// --admin (CTO 14 Nov 2026) creates an Admin: the Pakistan-level account that alone changes data.
 //
 // --nomination = the central management authority's nomination; --approval = its confirmation by
 // the authorized administrative process (two different documents). --central-it records a Central IT
@@ -14,7 +16,7 @@ import { provisionPakistanAdmin } from '../src/modules/users/provision.js';
 import { connectConfirmedDb, option, positional } from './admin-cli.js';
 
 const USAGE =
-  'Usage: pnpm provision:pakistan-admin <ajeerCode> --name "<name>" --nomination <ref> --approval <ref> --operator "<who>" [--central-it] [--name-ur "<name>"] --db demo|live --confirm=<database name>';
+  'Usage: pnpm provision:pakistan-admin <ajeerCode> --name "<name>" --nomination <ref> --approval <ref> --operator "<who>" [--central-it] [--admin] [--name-ur "<name>"] --db demo|live --confirm=<database name>';
 const VALUE_OPTIONS = ['db', 'confirm', 'name', 'name-ur', 'nomination', 'approval', 'operator'];
 
 async function main(): Promise<void> {
@@ -29,8 +31,9 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   const centralIt = args.includes('--central-it');
+  const admin = args.includes('--admin');
   console.warn(
-    `  provision     : ${ajeerCode} as Pakistan Admin${centralIt ? ' (Central IT)' : ''}`,
+    `  provision     : ${ajeerCode} as ${admin ? 'Admin' : 'Pakistan Admin'}${centralIt ? ' (Central IT)' : ''}`,
   );
   await connectConfirmedDb(args, USAGE);
   const nameUr = option(args, 'name-ur');
@@ -42,6 +45,7 @@ async function main(): Promise<void> {
     approvalRef,
     operator,
     ...(centralIt ? { department: 'CENTRAL_IT' as const } : {}),
+    ...(admin ? { role: 'admin' as const } : {}),
   });
   if (!result.ok) {
     console.error(`Refused: ${result.reason} — ${result.message}`);

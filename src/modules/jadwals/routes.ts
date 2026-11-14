@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { currentUser, requireAuth, requireRole, SUPERVISOR_ROLES } from '../../lib/auth.js';
+import { currentUser, requireAuth, requireRole, EDITOR_ROLES } from '../../lib/auth.js';
 import { parse } from '../../lib/errors.js';
 import {
   addVisitSchema,
@@ -12,6 +12,7 @@ import {
   mashwaraSchema,
   patchJadwalSchema,
   dutyApprovalSchema,
+  correctSchema,
   reopenSchema,
   submitSchema,
   visitParams,
@@ -28,6 +29,7 @@ import {
   submitJadwal,
   todayJadwal,
 } from './service.js';
+import { correctJadwal } from './correct.js';
 import { decideDuty } from './duty.js';
 
 export function jadwalsRouter(): Router {
@@ -105,14 +107,21 @@ export function jadwalsRouter(): Router {
     res.json({ jadwal: await submitJadwal(currentUser(req), id, body) });
   });
 
-  router.post('/:id/reopen', requireRole(...SUPERVISOR_ROLES), async (req, res) => {
+  router.post('/:id/reopen', requireRole(...EDITOR_ROLES), async (req, res) => {
     const { id } = parse(jadwalIdParams, req.params);
     const { reason } = parse(reopenSchema, req.body);
     res.json({ jadwal: await reopenJadwal(currentUser(req), id, reason) });
   });
 
-  // Official duty of a full-day mashwara: the owner's level directly above only (duty.ts).
-  router.post('/:id/duty-approval', requireRole(...SUPERVISOR_ROLES), async (req, res) => {
+  // The Admin corrects a submitted day directly, with a reason (correct.ts, CTO 14 Nov 2026).
+  router.post('/:id/correct', requireRole(...EDITOR_ROLES), async (req, res) => {
+    const { id } = parse(jadwalIdParams, req.params);
+    const body = parse(correctSchema, req.body);
+    res.json({ jadwal: await correctJadwal(currentUser(req), id, body) });
+  });
+
+  // Official duty of a full-day mashwara: the Admin decides (duty.ts, CTO 14 Nov 2026).
+  router.post('/:id/duty-approval', requireRole(...EDITOR_ROLES), async (req, res) => {
     const { id } = parse(jadwalIdParams, req.params);
     const body = parse(dutyApprovalSchema, req.body);
     res.json({ dutyApproval: await decideDuty(currentUser(req), id, body) });

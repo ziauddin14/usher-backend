@@ -14,6 +14,7 @@ import { seedDemo } from '../../seed/seed.js';
 const app = createApp();
 const TODAY = '2026-11-11';
 let pakistan: string; // 9010001
+let admin: string; // 9100001 — uploads the ERP file (CTO 14 Nov 2026)
 let division: string; // 9030001 Sukkur
 let district: string; // 9040001 Ghotki
 let zimmedar: string; // 9090412 (Ghotki)
@@ -51,6 +52,7 @@ describe('ERP receipts upload and reports', () => {
       mustChangePassword: false,
     });
     pakistan = await loginCookie(app, '9010001');
+    admin = await loginCookie(app, '9100001');
     division = await loginCookie(app, '9030001');
     district = await loginCookie(app, '9040001');
     zimmedar = await loginCookie(app, '9090412');
@@ -60,19 +62,20 @@ describe('ERP receipts upload and reports', () => {
     vi.useRealTimers();
   });
 
-  it('only the Pakistan level may upload or download the format', async () => {
+  it('only the Admin may upload or download the format (CTO 14 Nov 2026)', async () => {
     await upload(district, file([]), false).expect(403);
     await upload(zimmedar, file([]), false).expect(403);
     await get(division, '/erp/template.csv').expect(403);
-    const t = await get(pakistan, '/erp/template.csv').expect(200);
+    await upload(pakistan, file([]), false).expect(403); // Pakistan: view only
+    const t = await get(admin, '/erp/template.csv').expect(200);
     expect(t.headers['content-disposition']).toContain('UsherDesk-ERP-format.csv');
     expect(t.text).toContain('receipt_no,line_no,receipt_date,ajeer_code');
   });
 
   it('a file without the required columns or rows is refused with the reason', async () => {
-    const noHeader = await upload(pakistan, 'a,b\n1,2', false).expect(400);
+    const noHeader = await upload(admin, 'a,b\n1,2', false).expect(400);
     expect(noHeader.body.error.details).toMatchObject({ reason: 'ERP_FILE_NO_HEADER' });
-    const empty = await upload(pakistan, HEADER, false).expect(400);
+    const empty = await upload(admin, HEADER, false).expect(400);
     expect(empty.body.error.details.reason).toBe('ERP_FILE_EMPTY');
   });
 
@@ -86,7 +89,7 @@ describe('ERP receipts upload and reports', () => {
     ]);
 
   it('preview checks the file and saves nothing', async () => {
-    const res = await upload(pakistan, day1(), false).expect(200);
+    const res = await upload(admin, day1(), false).expect(200);
     expect(res.body).toMatchObject({
       fileName: 'eraseed-2026-11-10.csv',
       rows: 5,
@@ -107,7 +110,7 @@ describe('ERP receipts upload and reports', () => {
   });
 
   it('commit saves the valid rows once (audited); the same file again adds nothing', async () => {
-    const first = await upload(pakistan, day1(), true).expect(201);
+    const first = await upload(admin, day1(), true).expect(201);
     expect(first.body).toMatchObject({ committed: true, added: 4, updated: 0, unchanged: 0 });
     expect(await ErpReceipt.countDocuments()).toBe(4);
     const saved = await ErpReceipt.findOne({ receiptNo: 'R-100', lineNo: 1 }).lean();
@@ -120,18 +123,18 @@ describe('ERP receipts upload and reports', () => {
       await AuditLog.countDocuments({ action: 'ERP_UPLOAD', targetId: first.body.uploadId }),
     ).toBe(1);
 
-    const again = await upload(pakistan, day1(), true).expect(201);
+    const again = await upload(admin, day1(), true).expect(201);
     expect(again.body).toMatchObject({ added: 0, updated: 0, unchanged: 4 });
     expect(await ErpReceipt.countDocuments()).toBe(4);
 
-    const list = await get(pakistan, '/erp/uploads').expect(200);
+    const list = await get(admin, '/erp/uploads').expect(200);
     expect(list.body.uploads).toHaveLength(2);
     expect(list.body.uploads[0]).toMatchObject({ added: 0, unchanged: 4, rejected: 1 });
   });
 
   it('a later file can cancel a line: it is updated, never deleted, and stops counting', async () => {
     const res = await upload(
-      pakistan,
+      admin,
       file([`R-102,1,2026-11-10,9090412,NAQAD,1000,Telethon,,,,CANCELLED`]),
       true,
     ).expect(201);
@@ -142,7 +145,7 @@ describe('ERP receipts upload and reports', () => {
   it('a receipt edited in the ERP to fewer lines: the missing line is cancelled', async () => {
     const before = await ErpReceipt.countDocuments();
     const res = await upload(
-      pakistan,
+      admin,
       file([`R-100,1,2026-11-10,9090412,NAQAD,20000,Telethon,,,,ACTIVE`]),
       false,
     ).expect(200);
@@ -150,7 +153,7 @@ describe('ERP receipts upload and reports', () => {
     // Preview only: put it back as it was (both lines) before the report checks below.
     expect(await ErpReceipt.countDocuments({ receiptNo: 'R-100', cancelled: false })).toBe(2);
     const saved = await upload(
-      pakistan,
+      admin,
       file([`R-100,1,2026-11-10,9090412,NAQAD,20000,Telethon,,,,ACTIVE`]),
       true,
     ).expect(201);
@@ -161,7 +164,7 @@ describe('ERP receipts upload and reports', () => {
     });
     // The ERP brings the line back: it counts again.
     await upload(
-      pakistan,
+      admin,
       file([
         `R-100,1,2026-11-10,9090412,NAQAD,20000,Telethon,,,,ACTIVE`,
         `R-100,2,2026-11-10,9090412,NAQAD,25000,Ramzan,,,,`,
@@ -235,7 +238,7 @@ describe('ERP receipts upload and reports', () => {
       totals: { wusooli: 60000 },
     });
     await upload(
-      pakistan,
+      admin,
       [
         'receipt_no,receipt_date,ajeer_code,attiyat_type,amount_rs,mad,donor_name',
         'R-200,2026-11-09,9090412,NAQAD,40000,Ramzan,Donor Alif',
@@ -275,7 +278,7 @@ describe('ERP receipts upload and reports', () => {
 
   it('a too large file is refused', async () => {
     const big = 'x'.repeat(5 * 1024 * 1024 + 10);
-    const res = await upload(pakistan, big, false).expect(413);
+    const res = await upload(admin, big, false).expect(413);
     expect(res.body.error.details.reason).toBe('TOO_LARGE');
   });
 });

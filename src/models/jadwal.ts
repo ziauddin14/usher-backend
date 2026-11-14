@@ -185,6 +185,18 @@ const jadwalSchema = new Schema(
         { _id: false },
       ),
     ],
+    /** Direct corrections by the Admin (CTO 14 Nov 2026), oldest first; details in the audit log. */
+    corrections: [
+      new Schema(
+        {
+          by: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+          byAjeerCode: { type: String, required: true },
+          at: { type: Date, required: true },
+          reason: { type: String, required: true },
+        },
+        { _id: false },
+      ),
+    ],
     /**
      * Official-duty decision on a submitted full-day mashwara (CTO 6 Nov 2026). Absent = not
      * approved (pending): every record without it — all history included — is Submission only.

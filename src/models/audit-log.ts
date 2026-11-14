@@ -30,6 +30,10 @@ export const AUDIT_ACTIONS = [
   'VILLAGE_ISSUE_RESOLVE',
   // One-time move to no Tehsil level (CTO 13 Nov 2026): counts only.
   'MIGRATE_NO_TEHSIL',
+  // Admin (CTO 14 Nov 2026): a submitted jadwal corrected directly (reason, before / after), and a
+  // new zimmedar account created on the dashboard.
+  'JADWAL_CORRECT',
+  'USER_CREATE',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -49,6 +53,7 @@ const auditLogSchema = new Schema(
 );
 
 auditLogSchema.index({ at: -1 });
+auditLogSchema.index({ actorAjeerCode: 1, at: -1 });
 
 export type AuditLogDoc = InferSchemaType<typeof auditLogSchema>;
 

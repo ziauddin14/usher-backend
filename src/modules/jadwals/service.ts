@@ -58,6 +58,12 @@ export function serializeJadwal(doc: JadwalDocument) {
     })),
     totals: j.totals ?? null,
     reopened: (j.reopened ?? []).map((r) => ({ by: String(r.by), at: r.at, reason: r.reason })),
+    /** The Admin's direct corrections (CTO 14 Nov 2026); details in the audit log. */
+    corrections: (j.corrections ?? []).map((c) => ({
+      byAjeerCode: c.byAjeerCode,
+      at: c.at,
+      reason: c.reason,
+    })),
     /** Official-duty decision on a full-day mashwara; null = not decided (not field activity). */
     dutyApproval: j.dutyApproval
       ? {

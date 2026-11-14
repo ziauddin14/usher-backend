@@ -10,7 +10,7 @@ import { ERP_TEMPLATE_CSV, erpUpload, recentUploads } from './service.js';
  */
 export function erpRouter(): Router {
   const router = Router();
-  router.use(requireAuth, requireRole('pakistan'));
+  router.use(requireAuth, requireRole('admin'));
 
   router.post(
     '/uploads',

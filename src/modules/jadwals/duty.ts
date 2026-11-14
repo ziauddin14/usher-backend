@@ -1,6 +1,7 @@
 // Official-duty approval of a full-day mashwara (CTO 6 Nov 2026).
-// A submitted full-day mashwara is Submission only until the owner's level directly above
-// explicitly approves it as official duty; only then is it Field Activity. Rejected or undecided
+// A submitted full-day mashwara is Submission only until the Admin (CTO 14 Nov 2026; before that
+// the owner's level directly above) explicitly approves it as official duty; only then is it Field
+// Activity. Rejected or undecided
 // stays Submission only; a draft counts in neither. History is never approved automatically.
 // This is its own rule: a mobile-verification permission grants nothing here.
 import { Types } from 'mongoose';
@@ -20,10 +21,11 @@ import { type Role, User } from '../../models/user.js';
  *   suba / pakistan owners: no approver in Demo v1 → 403.
  * Never self, never any other level (a Tehsil never approves: not one of the approvers).
  */
+// CTO 14 Nov 2026: the Admin decides every official duty (supervisors only view).
 export const DUTY_APPROVER: Partial<Record<Role, Role>> = {
-  zimmedar: 'district',
-  district: 'division',
-  division: 'suba',
+  zimmedar: 'admin',
+  district: 'admin',
+  division: 'admin',
 };
 export function assertDutyApprover(caller: AuthUser, owner: { _id: unknown; role: Role }): void {
   if (String(owner._id) === caller.id) {
@@ -38,7 +40,7 @@ export function assertDutyApprover(caller: AuthUser, owner: { _id: unknown; role
     );
   }
   if (caller.role !== approver) {
-    throw new AppError(403, 'FORBIDDEN', 'Only the level directly above approves official duty');
+    throw new AppError(403, 'FORBIDDEN', 'Only the Admin approves official duty');
   }
 }
 

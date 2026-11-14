@@ -139,6 +139,14 @@ export interface SeedUser {
 
 /** The five demo logins (scope §6) and the demo Tehsil Zimmedar (Phase 2). */
 export const DEMO_USERS: SeedUser[] = [
+  // Admin (CTO 14 Nov 2026): the only role that changes data. Invented.
+  {
+    ajeerCode: '9100001',
+    name: 'Demo Admin',
+    nameUr: 'ڈیمو ایڈمن',
+    role: 'admin',
+    unitCode: 'PK',
+  },
   {
     ajeerCode: '9010001',
     name: 'Muhammad Saleem',

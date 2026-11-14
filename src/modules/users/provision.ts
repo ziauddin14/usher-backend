@@ -26,6 +26,11 @@ export interface ProvisionInput {
   operator: string;
   /** CENTRAL_IT only for a Central IT Department account; absent for any other Pakistan Admin. */
   department?: Department;
+  /**
+   * 'pakistan' (default): views everything. 'admin' (CTO 14 Nov 2026): the only role that changes
+   * data — users, Gaon, jadwal corrections, official duty, the ERP upload.
+   */
+  role?: 'pakistan' | 'admin';
 }
 
 export type ProvisionResult =
@@ -71,7 +76,7 @@ export async function provisionPakistanAdmin(input: ProvisionInput): Promise<Pro
     ajeerCode: input.ajeerCode,
     name: input.name.trim(),
     ...(input.nameUr?.trim() ? { nameUr: input.nameUr.trim() } : {}),
-    role: 'pakistan',
+    role: input.role ?? 'pakistan',
     unitCode: unit.code,
     unitPath: unit.path,
     passwordHash: await bcrypt.hash(INITIAL_PASSWORD, BCRYPT_COST),
@@ -94,7 +99,7 @@ export async function provisionPakistanAdmin(input: ProvisionInput): Promise<Pro
     unitPath: unit.path,
     details: {
       targetAjeerCode: input.ajeerCode,
-      role: 'pakistan',
+      role: input.role ?? 'pakistan',
       department: input.department ?? null,
       nominationRef: input.nominationRef.trim(),
       approvalRef: input.approvalRef.trim(),
