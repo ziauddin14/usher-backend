@@ -1,12 +1,14 @@
 import mongoose, { type InferSchemaType, type Model, Schema } from 'mongoose';
 
-export const ROLES = ['zimmedar', 'tehsil', 'district', 'division', 'suba', 'pakistan'] as const;
+// 'tehsil' stays only for old records (no Tehsil level since CTO 13 Nov 2026). 'admin' (CTO 14 Nov
+// 2026): the Pakistan-level Admin who alone changes data; every other dashboard role only views.
+export const ROLES = ['zimmedar', 'tehsil', 'district', 'division', 'suba', 'pakistan', 'admin'] as const;
 export type Role = (typeof ROLES)[number];
 
 /**
  * Higher number = higher level in the hierarchy (Pakistan → Suba → Division → District → Tehsil →
  * Ushar Zimmedar). Only for "below me" listings — approvals and management use explicit rules
- * (jadwals/duty.ts DUTY_APPROVER, auth.ts SUPERVISOR_ROLES), never the rank alone.
+ * (jadwals/duty.ts DUTY_APPROVER, auth.ts EDITOR_ROLES), never the rank alone.
  */
 export const ROLE_RANK: Record<Role, number> = {
   zimmedar: 0,
@@ -15,6 +17,7 @@ export const ROLE_RANK: Record<Role, number> = {
   division: 3,
   suba: 4,
   pakistan: 5,
+  admin: 6,
 };
 
 export const ZIMMEDARI = ['ushar', 'tehsil_town', 'event'] as const;
@@ -103,7 +106,9 @@ export function isCentrallyManaged(u: {
   department?: string | null;
   provisioned?: unknown;
 }): boolean {
-  return u.role === 'pakistan' || Boolean(u.department) || Boolean(u.provisioned);
+  return (
+    u.role === 'pakistan' || u.role === 'admin' || Boolean(u.department) || Boolean(u.provisioned)
+  );
 }
 
 /**
@@ -112,7 +117,7 @@ export function isCentrallyManaged(u: {
  * inserts (a one-element `$in` or `{ field: null }` would be).
  */
 export const NOT_CENTRALLY_MANAGED = {
-  role: { $ne: 'pakistan' },
+  role: { $nin: ['pakistan', 'admin'] },
   department: { $not: { $ne: null } },
   provisioned: { $not: { $ne: null } },
 } as const;

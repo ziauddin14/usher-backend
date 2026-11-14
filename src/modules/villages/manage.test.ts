@@ -1,5 +1,6 @@
-// District village management (CTO 7 Nov 2026): add, assign existing / new, reassign, correct,
-// duplicates and merge — scope, duplicate prevention and audit. Invented seed data only.
+// Village management (CTO 7 Nov 2026; by the Admin only since CTO 14 Nov 2026): add, assign
+// existing / new, reassign, correct, duplicates and merge — duplicate prevention and audit. District
+// and Division only view. Invented seed data only.
 import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loginCookie } from '../../../test/helpers.js';
@@ -10,7 +11,8 @@ import { Village } from '../../models/village.js';
 import { seedDemo } from '../../seed/seed.js';
 
 const app = createApp();
-let district: string; // 9040001, Ghotki
+let admin: string; // 9100001, the Admin
+let district: string; // 9040001, Ghotki (view only)
 let zimmedar: string; // 9090412, Ghotki
 let zimmedarId: string;
 let otherGhotki: { id: string; ajeerCode: string };
@@ -22,6 +24,7 @@ const post = (path: string, cookie: string, body: object) =>
 describe('District village management', () => {
   beforeAll(async () => {
     await seedDemo({ reset: true });
+    admin = await loginCookie(app, '9100001');
     district = await loginCookie(app, '9040001');
     zimmedar = await loginCookie(app, '9090412');
     zimmedarId = String((await User.findOne({ ajeerCode: '9090412' }).lean())!._id);
@@ -45,10 +48,11 @@ describe('District village management', () => {
     await request(app).get('/api/v1/villages/duplicates').set('Cookie', zimmedar).expect(403);
   });
 
-  it('District adds a new village (approved, source district) and assigns it at once', async () => {
-    const res = await post('/villages/manage', district, {
+  it('the Admin adds a new village (approved, source district) and assigns it at once', async () => {
+    const res = await post('/villages/manage', admin, {
       name: '  گوٹھ   نئی بستی ',
       assignTo: zimmedarId,
+      districtCode: 'GHOTKI',
     }).expect(201);
     expect(res.body.village).toMatchObject({
       name: 'گوٹھ نئی بستی',
@@ -71,12 +75,15 @@ describe('District village management', () => {
   });
 
   it('the same name again is refused with the existing village (assign it instead)', async () => {
-    const res = await post('/villages/manage', district, { name: 'نئی بستی' }).expect(409);
+    const res = await post('/villages/manage', admin, {
+      name: 'نئی بستی',
+      districtCode: 'GHOTKI',
+    }).expect(409);
     expect(res.body.error.code).toBe('VILLAGE_EXISTS');
     expect(res.body.error.details.village).toMatchObject({ name: 'گوٹھ نئی بستی' });
     // Assigning the existing record to another zimmedar = reassignment, no new village.
     const id = res.body.error.details.village.id as string;
-    await post(`/villages/${id}/assign`, district, { userId: otherGhotki.id }).expect(200);
+    await post(`/villages/${id}/assign`, admin, { userId: otherGhotki.id }).expect(200);
     expect(await Village.countDocuments({ nameKey: 'نئی بستی' })).toBe(1);
     const log = await AuditLog.findOne({ action: 'VILLAGE_REASSIGN', targetId: id }).lean();
     expect(log?.details).toMatchObject({ to: { ajeerCode: otherGhotki.ajeerCode } });
@@ -94,7 +101,7 @@ describe('District village management', () => {
       status: 'approved',
     });
     const before = await Village.countDocuments();
-    await post(`/villages/${pool._id.toHexString()}/assign`, district, {
+    await post(`/villages/${pool._id.toHexString()}/assign`, admin, {
       userId: zimmedarId,
     }).expect(200);
     expect(await Village.countDocuments()).toBe(before);
@@ -102,43 +109,52 @@ describe('District village management', () => {
   });
 
   it('cannot assign to a zimmedar of another district, nor create there (scope)', async () => {
-    const created = await post('/villages/manage', district, { name: 'گوٹھ سرحد' }).expect(201);
+    const created = await post('/villages/manage', admin, {
+      name: 'گوٹھ سرحد',
+      districtCode: 'GHOTKI',
+    }).expect(201);
     const id = created.body.village.id as string;
-    const bad = await post(`/villages/${id}/assign`, district, { userId: foreign.id }).expect(409);
+    const bad = await post(`/villages/${id}/assign`, admin, { userId: foreign.id }).expect(409);
     expect(bad.body.error.code).toBe('CONFLICT');
-    await post('/villages/manage', district, { name: 'گوٹھ سرحد', assignTo: foreign.id }).expect(
-      409,
+    await post('/villages/manage', admin, {
+      name: 'گوٹھ سرحد',
+      assignTo: foreign.id,
+      districtCode: 'GHOTKI',
+    }).expect(409);
+    // A unit that is not a District is refused.
+    await post('/villages/manage', admin, { name: 'گوٹھ باہر', districtCode: 'SUKKUR' }).expect(
+      400,
     );
-    // Another district's code is outside the caller's scope → 404.
-    await post('/villages/manage', district, {
-      name: 'گوٹھ باہر',
-      districtCode: foreign.unitCode,
-    }).expect(404);
     expect(await Village.countDocuments({ nameKey: 'باہر' })).toBe(0);
   });
 
-  it("another district's village cannot be read, renamed, assigned or merged (404)", async () => {
-    const other = await Village.findOne({ unitPath: foreign.unitPath, status: 'approved' }).lean();
-    const id = other!._id.toHexString();
-    await request(app)
-      .patch(`/api/v1/villages/${id}`)
-      .set('Cookie', district)
-      .send({ name: 'گوٹھ چوری' })
-      .expect(404);
-    await post(`/villages/${id}/assign`, district, { userId: zimmedarId }).expect(404);
-    await request(app)
-      .get(`/api/v1/villages/duplicates?unit=${foreign.unitCode}`)
-      .set('Cookie', district)
-      .expect(404);
-    expect((await Village.findById(id).lean())?.name).toBe(other!.name);
+  it('District and Division only view: they cannot add, rename, assign or merge (CTO 14 Nov 2026)', async () => {
+    const v = await Village.findOne({ districtCode: 'GHOTKI', status: 'approved' }).lean();
+    const id = v!._id.toHexString();
+    const division = await loginCookie(app, '9030001');
+    for (const who of [district, division]) {
+      await post('/villages/manage', who, { name: 'گوٹھ منع', districtCode: 'GHOTKI' }).expect(403);
+      await request(app)
+        .patch(`/api/v1/villages/${id}`)
+        .set('Cookie', who)
+        .send({ name: 'گوٹھ چوری' })
+        .expect(403);
+      await post(`/villages/${id}/assign`, who, { userId: zimmedarId }).expect(403);
+      await post(`/villages/${id}/merge`, who, { intoId: id }).expect(403);
+      await request(app).get('/api/v1/villages/duplicates').set('Cookie', who).expect(403);
+    }
+    expect((await Village.findById(id).lean())?.name).toBe(v!.name);
   });
 
   it('corrects a spelling: old name kept, audited, a taken name refused', async () => {
-    const v = await post('/villages/manage', district, { name: 'گوٹھ غلط ہجے' }).expect(201);
+    const v = await post('/villages/manage', admin, {
+      name: 'گوٹھ غلط ہجے',
+      districtCode: 'GHOTKI',
+    }).expect(201);
     const id = v.body.village.id as string;
     const res = await request(app)
       .patch(`/api/v1/villages/${id}`)
-      .set('Cookie', district)
+      .set('Cookie', admin)
       .send({ name: 'گوٹھ درست ہجے', tehsil: 'Ubauro' })
       .expect(200);
     expect(res.body.village.name).toBe('گوٹھ درست ہجے');
@@ -152,7 +168,10 @@ describe('District village management', () => {
     });
 
     // The old spelling now leads to this village (district add and zimmedar add).
-    const again = await post('/villages/manage', district, { name: 'غلط ہجے' }).expect(409);
+    const again = await post('/villages/manage', admin, {
+      name: 'غلط ہجے',
+      districtCode: 'GHOTKI',
+    }).expect(409);
     expect(again.body.error.details.village.id).toBe(id);
     const z = await post('/villages', zimmedar, { name: 'گوٹھ غلط ہجے' }).expect(409);
     expect(z.body.error.details.village.id).toBe(id);
@@ -160,25 +179,31 @@ describe('District village management', () => {
     // Renaming to a name another village has → 409.
     const taken = await request(app)
       .patch(`/api/v1/villages/${id}`)
-      .set('Cookie', district)
+      .set('Cookie', admin)
       .send({ name: 'گوٹھ نئی بستی' })
       .expect(409);
     expect(taken.body.error.code).toBe('VILLAGE_EXISTS');
   });
 
   it('finds look-alike villages and merges one into the other (spelling kept on the survivor)', async () => {
-    const a = await post('/villages/manage', district, { name: 'گوٹھ پیر بخش' }).expect(201);
-    const b = await post('/villages/manage', district, { name: 'گوٹھ پیربخش' }).expect(201);
+    const a = await post('/villages/manage', admin, {
+      name: 'گوٹھ پیر بخش',
+      districtCode: 'GHOTKI',
+    }).expect(201);
+    const b = await post('/villages/manage', admin, {
+      name: 'گوٹھ پیربخش',
+      districtCode: 'GHOTKI',
+    }).expect(201);
     const dup = await request(app)
-      .get('/api/v1/villages/duplicates')
-      .set('Cookie', district)
+      .get('/api/v1/villages/duplicates?unit=GHOTKI')
+      .set('Cookie', admin)
       .expect(200);
     const group = (dup.body.groups as { id: string }[][]).find((g) =>
       g.some((v) => v.id === a.body.village.id),
     );
     expect(group?.map((v) => v.id).sort()).toEqual([a.body.village.id, b.body.village.id].sort());
 
-    await post(`/villages/${b.body.village.id}/merge`, district, {
+    await post(`/villages/${b.body.village.id}/merge`, admin, {
       intoId: a.body.village.id,
     }).expect(200);
     const merged = await Village.findById(b.body.village.id).lean();
@@ -187,16 +212,6 @@ describe('District village management', () => {
     expect(survivor?.formerNames?.map((f) => f.nameKey)).toContain('پیربخش');
     expect(await AuditLog.countDocuments({ action: 'VILLAGE_MERGE' })).toBeGreaterThan(0);
     // The merged spelling cannot be added again.
-    await post('/villages/manage', district, { name: 'پیربخش' }).expect(409);
-  });
-
-  it('the division above sees and manages the district list too (inside its scope)', async () => {
-    const division = await loginCookie(app, '9030001');
-    await post('/villages/manage', division, { name: 'گوٹھ ڈویژن' }).expect(400); // not a district
-    const res = await post('/villages/manage', division, {
-      name: 'گوٹھ ڈویژن',
-      districtCode: 'GHOTKI',
-    }).expect(201);
-    expect(res.body.village.districtCode).toBe('GHOTKI');
+    await post('/villages/manage', admin, { name: 'پیربخش', districtCode: 'GHOTKI' }).expect(409);
   });
 });

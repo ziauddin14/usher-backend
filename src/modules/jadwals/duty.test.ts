@@ -113,7 +113,15 @@ describe('official-duty approval of a full-day mashwara', () => {
       passwordHash: await bcrypt.hash('demo1234', 4),
       mustChangePassword: false,
     });
-    for (const code of ['9040001', '9030001', '9020001', '9010001', '9090412', '40003']) {
+    for (const code of [
+      '9100001',
+      '9040001',
+      '9030001',
+      '9020001',
+      '9010001',
+      '9090412',
+      '40003',
+    ]) {
       cookies[code] = await loginCookie(app, code);
     }
     // A second Ghotki zimmedar (same level as the owner).
@@ -148,14 +156,16 @@ describe('official-duty approval of a full-day mashwara', () => {
     expect(await dutyCell()).toBe('Duty faisla baqi');
   });
 
-  it('only the level directly above decides — never the owner, a peer, a higher level or another district', async () => {
+  it('only the Admin decides — never the owner, a peer or any supervisor', async () => {
     await decide(mashwaraId, '9090412', 'approve').expect(403); // the owner (self)
     await decide(mashwaraId, 'peer', 'approve').expect(403); // same level
-    await decide(mashwaraId, '9030001', 'approve').expect(403); // two levels up
+    // CTO 14 Nov 2026: the Admin decides; District, Division, Suba and Pakistan only view.
+    await decide(mashwaraId, '9040001', 'approve').expect(403);
+    await decide(mashwaraId, '9030001', 'approve').expect(403);
     await decide(mashwaraId, '9020001', 'approve').expect(403);
     await decide(mashwaraId, '9010001', 'approve').expect(403);
-    await decide(mashwaraId, '40003', 'approve').expect(404); // other district: out of scope
-    await decide(mashwaraId, '9040001', 'maybe').expect(400);
+    await decide(mashwaraId, '40003', 'approve').expect(403);
+    await decide(mashwaraId, '9100001', 'maybe').expect(400);
     expect(
       await AuditLog.countDocuments({
         action: { $in: ['MASHWARA_DUTY_APPROVE', 'MASHWARA_DUTY_REJECT'] },
@@ -165,14 +175,14 @@ describe('official-duty approval of a full-day mashwara', () => {
   });
 
   it('a rejected mashwara stays Submission only (audited)', async () => {
-    const res = await decide(mashwaraId, '9040001', 'reject', 'Duty ka hukm nahi tha').expect(200);
-    expect(res.body.dutyApproval).toMatchObject({ status: 'rejected', byAjeerCode: '9040001' });
+    const res = await decide(mashwaraId, '9100001', 'reject', 'Duty ka hukm nahi tha').expect(200);
+    expect(res.body.dutyApproval).toMatchObject({ status: 'rejected', byAjeerCode: '9100001' });
     expect(await todayOf('9090412')).toBe('mashwara_full');
     expect((await ghotkiTiles()).today).toMatchObject({ submitted: 1, field: 0 });
     expect(await dutyCell()).toBe('Duty mustarad');
     const log = await AuditLog.findOne({ action: 'MASHWARA_DUTY_REJECT' }).lean();
     expect(log).toMatchObject({
-      actorAjeerCode: '9040001',
+      actorAjeerCode: '9100001',
       targetType: 'jadwal',
       targetId: mashwaraId,
       details: { date: TODAY, ajeerCode: '9090412', previous: null },
@@ -183,32 +193,32 @@ describe('official-duty approval of a full-day mashwara', () => {
   it('changing a decision needs a reason; repeating it changes nothing; history is kept in full', async () => {
     // Rejected → approve without a reason (or a too short one): refused, nothing changes.
     for (const reason of [undefined, 'abc']) {
-      const r = await decide(mashwaraId, '9040001', 'approve', reason).expect(400);
+      const r = await decide(mashwaraId, '9100001', 'approve', reason).expect(400);
       expect(r.body.error.details).toMatchObject({ field: 'reason', reason: 'REASON_REQUIRED' });
     }
     expect(await todayOf('9090412')).toBe('mashwara_full');
     expect(await dutyCell()).toBe('Duty mustarad');
     // Repeating the current decision: 200, no write, no second audit entry.
-    await decide(mashwaraId, '9040001', 'reject').expect(200);
+    await decide(mashwaraId, '9100001', 'reject').expect(200);
     expect(await AuditLog.countDocuments({ action: 'MASHWARA_DUTY_REJECT' })).toBe(1);
   });
 
   it('an approved mashwara counts in both; dashboard, children, Excel and print data agree', async () => {
-    await decide(mashwaraId, '9040001', 'approve', 'Sarkari hukm mil gaya').expect(200);
+    await decide(mashwaraId, '9100001', 'approve', 'Sarkari hukm mil gaya').expect(200);
     const j = (await get(`/jadwals/${mashwaraId}`, '9040001').expect(200)).body.jadwal;
     expect(j.dutyApproval).toMatchObject({
       status: 'approved',
-      byAjeerCode: '9040001',
+      byAjeerCode: '9100001',
       reason: 'Sarkari hukm mil gaya',
     });
     const approveLog = await AuditLog.findOne({ action: 'MASHWARA_DUTY_APPROVE' }).lean();
     expect(approveLog).toMatchObject({
-      actorAjeerCode: '9040001',
+      actorAjeerCode: '9100001',
       details: {
         previous: 'rejected',
         previousDecision: {
           status: 'rejected',
-          byAjeerCode: '9040001',
+          byAjeerCode: '9100001',
           reason: 'Duty ka hukm nahi tha',
         },
         reason: 'Sarkari hukm mil gaya',
@@ -270,7 +280,7 @@ describe('official-duty approval of a full-day mashwara', () => {
   });
 
   it('reopen clears the decision; a draft mashwara counts in neither; re-submitted = undecided', async () => {
-    await post(`/jadwals/${mashwaraId}/reopen`, '9040001', {
+    await post(`/jadwals/${mashwaraId}/reopen`, '9100001', {
       reason: 'Tafseel durust karein',
     }).expect(200);
     expect(await todayOf('9090412')).toBe('jari');
@@ -283,7 +293,7 @@ describe('official-duty approval of a full-day mashwara', () => {
         clearedDutyApproval: 'approved',
         clearedDutyDecision: {
           status: 'approved',
-          byAjeerCode: '9040001',
+          byAjeerCode: '9100001',
           reason: 'Sarkari hukm mil gaya',
         },
       },
@@ -299,7 +309,7 @@ describe('official-duty approval of a full-day mashwara', () => {
           .lean()
       ).map((l) => l.action),
     ).toEqual(['MASHWARA_DUTY_REJECT', 'MASHWARA_DUTY_APPROVE']);
-    const draft = await decide(mashwaraId, '9040001', 'approve').expect(409);
+    const draft = await decide(mashwaraId, '9100001', 'approve').expect(409);
     expect(draft.body.error.details).toMatchObject({ reason: 'NOT_SUBMITTED' });
     // Excel agrees with the screen and print: a draft has no duty state.
     const owner = await User.findOne({ ajeerCode: '9090412' }).lean();
@@ -318,7 +328,7 @@ describe('official-duty approval of a full-day mashwara', () => {
           dutyApproval: {
             status: 'approved',
             by: owner!._id,
-            byAjeerCode: '9040001',
+            byAjeerCode: '9100001',
             at: new Date(),
           },
         },
@@ -343,7 +353,7 @@ describe('official-duty approval of a full-day mashwara', () => {
             { $set: { submittedAt: new Date(Date.parse(`${TODAY}T08:00:00Z`)) } },
           )
           .then(() => original(filter, update))) as unknown as typeof Jadwal.updateOne);
-    const stale = await decide(mashwaraId, '9040001', 'approve').expect(409);
+    const stale = await decide(mashwaraId, '9100001', 'approve').expect(409);
     expect(stale.body.error.message).toMatch(/changed meanwhile/);
     spy.mockRestore();
     expect((await Jadwal.findById(mashwaraId).lean())!.dutyApproval).toBeUndefined();
@@ -364,14 +374,14 @@ describe('official-duty approval of a full-day mashwara', () => {
               dutyApproval: {
                 status: 'rejected',
                 by: owner!._id,
-                byAjeerCode: '9040001',
+                byAjeerCode: '9100001',
                 at: new Date(),
               },
             },
           },
         )
         .then(() => original(filter, update))) as unknown as typeof Jadwal.updateOne);
-    const raced = await decide(mashwaraId, '9040001', 'approve').expect(409);
+    const raced = await decide(mashwaraId, '9100001', 'approve').expect(409);
     expect(raced.body.error.message).toMatch(/changed meanwhile/);
     spy2.mockRestore();
     expect((await Jadwal.findById(mashwaraId).lean())!.dutyApproval).toMatchObject({
@@ -379,7 +389,7 @@ describe('official-duty approval of a full-day mashwara', () => {
     });
     // A screen that still shows "undecided" while the jadwal is already rejected: 409, nothing
     // written (no silent 200, no reason rule skipped).
-    const stale2 = await decide(mashwaraId, '9040001', 'reject', undefined, null).expect(409);
+    const stale2 = await decide(mashwaraId, '9100001', 'reject', undefined, null).expect(409);
     expect(stale2.body.error.details).toMatchObject({
       reason: 'DECISION_CHANGED',
       current: 'rejected',
@@ -395,7 +405,7 @@ describe('official-duty approval of a full-day mashwara', () => {
             { $set: { 'dutyApproval.at': new Date(t1.at.getTime() + 60_000) } },
           )
           .then(() => original(filter, update))) as unknown as typeof Jadwal.updateOne);
-    const raced2 = await decide(mashwaraId, '9040001', 'approve', 'Hukm ab mila').expect(409);
+    const raced2 = await decide(mashwaraId, '9100001', 'approve', 'Hukm ab mila').expect(409);
     expect(raced2.body.error.message).toMatch(/changed meanwhile/);
     spy3.mockRestore();
     const kept = (await Jadwal.findById(mashwaraId).lean())!.dutyApproval!;
@@ -404,7 +414,7 @@ describe('official-duty approval of a full-day mashwara', () => {
     await Jadwal.updateOne({ _id: mashwaraId }, { $unset: { dutyApproval: 1 } }); // fixture only
 
     // Two submits of the same draft: the second never overwrites the first.
-    await post(`/jadwals/${mashwaraId}/reopen`, '9040001', { reason: 'Dobara dekhein' }).expect(
+    await post(`/jadwals/${mashwaraId}/reopen`, '9100001', { reason: 'Dobara dekhein' }).expect(
       200,
     );
     const [a, b] = await Promise.all([
@@ -417,7 +427,7 @@ describe('official-duty approval of a full-day mashwara', () => {
 
   it('only a submitted full-day mashwara is decided', async () => {
     const res = await post('/jadwals', 'peer', { entryType: 'rukhsat' }).expect(201);
-    const r = await decide(res.body.jadwal.id as string, '9040001', 'approve').expect(409);
+    const r = await decide(res.body.jadwal.id as string, '9100001', 'approve').expect(409);
     expect(r.body.error.details).toMatchObject({ reason: 'NOT_MASHWARA' });
     expect(await todayOf(cookies.peerCode!)).toBe('rukhsat');
   });
@@ -436,24 +446,23 @@ describe('assertDutyApprover', () => {
   });
   const owner = (id: string, role: AuthUser['role']) => ({ _id: id, role });
 
-  it('the level directly above only; never self, same level, two levels up, or for suba / pakistan owners', () => {
-    expect(() => assertDutyApprover(caller('a', 'district'), owner('b', 'zimmedar'))).not.toThrow();
-    expect(() => assertDutyApprover(caller('a', 'division'), owner('b', 'district'))).not.toThrow();
-    expect(() => assertDutyApprover(caller('a', 'suba'), owner('b', 'division'))).not.toThrow();
-    expect(() => assertDutyApprover(caller('a', 'district'), owner('a', 'zimmedar'))).toThrow(
+  it('the Admin only (CTO 14 Nov 2026); never self, any supervisor, or for suba / pakistan owners', () => {
+    for (const o of ['zimmedar', 'district', 'division'] as const) {
+      expect(() => assertDutyApprover(caller('a', 'admin'), owner('b', o))).not.toThrow();
+    }
+    expect(() => assertDutyApprover(caller('a', 'admin'), owner('a', 'zimmedar'))).toThrow(
       /own mashwara/,
     );
-    expect(() => assertDutyApprover(caller('a', 'district'), owner('b', 'district'))).toThrow(
-      /directly above/,
+    expect(() => assertDutyApprover(caller('a', 'district'), owner('b', 'zimmedar'))).toThrow(
+      /Only the Admin/,
     );
-    expect(() => assertDutyApprover(caller('a', 'division'), owner('b', 'zimmedar'))).toThrow(
-      /directly above/,
+    expect(() => assertDutyApprover(caller('a', 'suba'), owner('b', 'division'))).toThrow(
+      /Only the Admin/,
     );
-    // A department does not make anyone an approver.
-    expect(() => assertDutyApprover(caller('a', 'pakistan'), owner('b', 'suba'))).toThrow(
+    expect(() => assertDutyApprover(caller('a', 'admin'), owner('b', 'suba'))).toThrow(
       /No official-duty approver/,
     );
-    expect(() => assertDutyApprover(caller('a', 'pakistan'), owner('b', 'pakistan'))).toThrow(
+    expect(() => assertDutyApprover(caller('a', 'admin'), owner('b', 'pakistan'))).toThrow(
       /No official-duty approver/,
     );
   });

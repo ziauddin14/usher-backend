@@ -16,6 +16,7 @@ const today = karachiDate();
 let arif: string; // 9090412, Ghotki
 let other: string; // another Ghotki zimmedar
 let district: string; // 9040001 Ghotki
+let admin: string; // 9100001 — the only role that changes data (CTO 14 Nov 2026)
 let larkanaDistrict: string;
 let villageIds: string[];
 
@@ -61,6 +62,7 @@ beforeAll(async () => {
   other = await loginCookie(app, otherUser!.ajeerCode);
   district = await loginCookie(app, '9040001');
   larkanaDistrict = await loginCookie(app, '40002');
+  admin = await loginCookie(app, '9100001');
   // The demo zimmedar uses only the villages assigned to them (CTO 7 Nov 2026).
   const arifId = (await User.findOne({ ajeerCode: '9090412' }).lean())!._id;
   villageIds = (
@@ -248,7 +250,7 @@ describe('villages and visits', () => {
     expect(dup.body.error.details.village).toMatchObject({ name: 'گوٹھ پول', mine: false });
     // Once the District assigns it, it is listed and usable.
     const arifId = String((await User.findOne({ ajeerCode: '9090412' }).lean())!._id);
-    await api(district)
+    await api(admin)
       .post(`/villages/${String(pool!._id)}/assign`, { userId: arifId })
       .expect(200);
     const after = (await api(arif).get('/villages').expect(200)).body.villages as {
@@ -461,15 +463,16 @@ describe('submit, lock and reopen', () => {
     await api(arif).get(`/jadwals/${id}`).expect(200);
   });
 
-  it('reopen: district in scope with a reason (audited); zimmedar 403; other district 404', async () => {
+  it('reopen: the Admin with a reason (audited); zimmedar and District 403 (CTO 14 Nov 2026)', async () => {
     const id = await fullDay();
     await api(arif).post(`/jadwals/${id}/submit`, { meterEnd: 48276 }).expect(200);
 
     await api(arif).post(`/jadwals/${id}/reopen`, { reason: 'ghalti hui' }).expect(403);
-    await api(larkanaDistrict).post(`/jadwals/${id}/reopen`, { reason: 'ghalti hui' }).expect(404);
-    await api(district).post(`/jadwals/${id}/reopen`, { reason: 'abc' }).expect(400);
+    await api(larkanaDistrict).post(`/jadwals/${id}/reopen`, { reason: 'ghalti hui' }).expect(403);
+    await api(district).post(`/jadwals/${id}/reopen`, { reason: 'ghalti hui' }).expect(403);
+    await api(admin).post(`/jadwals/${id}/reopen`, { reason: 'abc' }).expect(400);
 
-    const res = await api(district)
+    const res = await api(admin)
       .post(`/jadwals/${id}/reopen`, { reason: 'Meter reading ghalat' })
       .expect(200);
     expect(res.body.jadwal).toMatchObject({

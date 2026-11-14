@@ -189,3 +189,42 @@ export const dutyApprovalSchema = z.object({
   expected: z.enum(['approved', 'rejected']).nullable(),
   reason: z.string().trim().max(300).optional(),
 });
+
+const correctMoney = z.number().int().min(0).max(100_000_000);
+const correctPeople = z.number().int().min(0).max(100_000);
+
+/** POST /jadwals/:id/correct — the Admin's direct correction of a submitted day (correct.ts). */
+export const correctSchema = z.object({
+  reason: z.string().trim().min(5).max(300),
+  travel: z
+    .object({
+      meterStart: z.number().int().min(0).max(10_000_000).optional(),
+      meterEnd: z.number().int().min(0).max(10_000_000).optional(),
+      fare: correctMoney.optional(),
+    })
+    .optional(),
+  visits: z
+    .array(
+      z.object({
+        visitId: objectId,
+        remove: z.literal(true).optional(),
+        villageId: objectId.optional(),
+        entries: z
+          .array(
+            z.object({
+              index: z.number().int().min(0).max(200),
+              amount: correctMoney.optional(),
+              qty: z.number().min(0).max(1_000_000).optional(),
+              remove: z.literal(true).optional(),
+            }),
+          )
+          .max(200)
+          .optional(),
+        gsb: z.object({ boxesOpened: correctPeople, amount: correctMoney }).optional(),
+        ijtimaParticipants: correctPeople.optional(),
+        mashwaraParticipants: correctPeople.optional(),
+      }),
+    )
+    .max(50)
+    .optional(),
+});

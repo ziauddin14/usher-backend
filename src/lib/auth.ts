@@ -143,15 +143,15 @@ export function requireRole(...roles: Role[]): RequestHandler {
 }
 
 /**
- * Supervisors: District and above. They may change data in their scope (users, Gaon, reopen,
- * official duty). A Tehsil Zimmedar is NOT one (CTO 9 Nov 2026: no password reset, no
- * activate / deactivate, no Gaon management).
+ * Who may change data (CTO 14 Nov 2026): the Admin only — users (create, reset, activate /
+ * deactivate), Gaon (assign, merge, rename, problems), jadwal reopen and correction, official duty,
+ * the ERP upload. District, Division, Suba and Pakistan only view and download reports.
  */
-export const SUPERVISOR_ROLES: Role[] = ['district', 'division', 'suba', 'pakistan'];
+export const EDITOR_ROLES: Role[] = ['admin'];
 
-/** Dashboards: the supervisors only. No Tehsil dashboard since CTO 13 Nov 2026 (a Tehsil/Town
- * Zimmedar is a zimmedar). */
-export const DASHBOARD_ROLES: Role[] = [...SUPERVISOR_ROLES];
+/** Dashboards (view, reports, downloads): District and above, and the Admin. No Tehsil dashboard
+ * since CTO 13 Nov 2026 (a Tehsil/Town Zimmedar is a zimmedar). */
+export const DASHBOARD_ROLES: Role[] = ['district', 'division', 'suba', 'pakistan', 'admin'];
 
 export function currentUser(req: Request): AuthUser {
   if (!req.user) throw new AppError(401, 'UNAUTHENTICATED', 'Login required');

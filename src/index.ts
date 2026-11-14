@@ -9,6 +9,7 @@ import { authRouter } from './modules/auth/routes.js';
 import { healthRouter } from './modules/health/routes.js';
 import { jadwalsRouter } from './modules/jadwals/routes.js';
 import { dashRouter } from './modules/dash/routes.js';
+import { auditRouter } from './modules/audit/routes.js';
 import { erpRouter } from './modules/erp/routes.js';
 import { meRouter } from './modules/me/routes.js';
 import { metaRouter } from './modules/meta/routes.js';
@@ -68,6 +69,7 @@ export function createApp(): Express {
   api.use('/me', meRouter());
   api.use('/dash', dashTiming, dashRouter());
   api.use('/erp', erpRouter());
+  api.use('/audit', auditRouter());
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);

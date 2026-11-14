@@ -253,11 +253,18 @@ describe('Pakistan Admin provisioning (CTO 6 Nov 2026)', () => {
     const target = await User.findOne({ ajeerCode: '9040001' }).lean();
     const id = String(target!._id);
     const as = cookies['9010001']!;
+    // POST /users exists for the Admin only (a new zimmedar, CTO 14 Nov 2026).
     await request(app)
       .post('/api/v1/users')
       .set('Cookie', as)
       .send({ ajeerCode: '9011999', role: 'pakistan' })
-      .expect(404);
+      .expect(403);
+    const admin = await loginCookie(app, '9100001');
+    await request(app)
+      .post('/api/v1/users')
+      .set('Cookie', admin)
+      .send({ ajeerCode: '9011999', role: 'pakistan' })
+      .expect(400);
     await request(app)
       .patch(`/api/v1/users/${id}`)
       .set('Cookie', as)
@@ -368,11 +375,13 @@ describe('forgot password → district reset', () => {
     expect(await PasswordResetRequest.countDocuments({ userId: other!._id })).toBe(0);
   });
 
-  it('shows the request to the district (and above), not to other districts', async () => {
+  it('shows the request to the Admin only (CTO 14 Nov 2026), never to supervisors', async () => {
     const district = await loginCookie(app, '9040001');
+    await request(app).get('/api/v1/users/reset-requests').set('Cookie', district).expect(403);
+    const admin = await loginCookie(app, '9100001');
     const res = await request(app)
       .get('/api/v1/users/reset-requests')
-      .set('Cookie', district)
+      .set('Cookie', admin)
       .expect(200);
     expect(res.body.requests).toEqual([
       expect.objectContaining({ ajeerCode: '9090412', userId: arifId, unitCode: 'GHOTKI' }),
@@ -387,7 +396,7 @@ describe('forgot password → district reset', () => {
     await request(app).get('/api/v1/users/reset-requests').set('Cookie', zimmedar).expect(403);
   });
 
-  it('district resets: initial password, change forced, old sessions end, request closed, audited', async () => {
+  it('the Admin resets: initial password, change forced, old sessions end, request closed, audited', async () => {
     // Two devices logged in before the reset (cookie and Bearer).
     const phone = await loginCookie(app, '9090412');
     const loginRes = await login({ ajeerCode: '9090412', password: 'demo1234' }).expect(200);
@@ -399,6 +408,11 @@ describe('forgot password → district reset', () => {
     await request(app)
       .post(`/api/v1/users/${arifId}/reset-password`)
       .set('Cookie', district)
+      .expect(403); // view only (CTO 14 Nov 2026)
+    const admin = await loginCookie(app, '9100001');
+    await request(app)
+      .post(`/api/v1/users/${arifId}/reset-password`)
+      .set('Cookie', admin)
       .expect(200);
 
     // Every session issued before the reset is dead — also for /auth/me and change-password,
@@ -420,24 +434,28 @@ describe('forgot password → district reset', () => {
     expect(res.body.user.mustChangePassword).toBe(true);
   });
 
-  it('district can reset directly (no request), but only its own lower-level users', async () => {
-    const district = await loginCookie(app, '9040001');
-    await request(app)
-      .post(`/api/v1/users/${larkanaUserId}/reset-password`)
-      .set('Cookie', district)
-      .expect(404);
-
+  it('the Admin resets anyone directly (no request) except an Admin; supervisors never reset', async () => {
     const division = await loginCookie(app, '9030001');
     const district40001 = String((await User.findOne({ ajeerCode: '9040001' }).lean())!._id);
     await request(app)
       .post(`/api/v1/users/${district40001}/reset-password`)
       .set('Cookie', division)
+      .expect(403);
+
+    const admin = await loginCookie(app, '9100001');
+    await request(app)
+      .post(`/api/v1/users/${larkanaUserId}/reset-password`)
+      .set('Cookie', admin)
+      .expect(200);
+    await request(app)
+      .post(`/api/v1/users/${district40001}/reset-password`)
+      .set('Cookie', admin)
       .expect(200);
 
-    const self = String((await User.findOne({ ajeerCode: '9030001' }).lean())!._id);
+    const self = String((await User.findOne({ ajeerCode: '9100001' }).lean())!._id);
     await request(app)
       .post(`/api/v1/users/${self}/reset-password`)
-      .set('Cookie', division)
+      .set('Cookie', admin)
       .expect(403);
   });
 });

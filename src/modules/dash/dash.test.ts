@@ -15,6 +15,7 @@ import { percent } from './service.js';
 const app = createApp();
 const TODAY = '2026-11-01';
 let district: string; // 9040001 Ghotki
+let admin: string; // 9100001 Admin (the only role that changes data)
 let division: string; // 9030001 Sukkur
 let pakistan: string; // 9010001
 let zimmedar: string; // 9090412
@@ -56,6 +57,7 @@ describe('dashboards (B1 / B2)', () => {
     pakistan = await loginCookie(app, '9010001');
     zimmedar = await loginCookie(app, '9090412');
     larkanaDistrict = await loginCookie(app, '40002');
+    admin = await loginCookie(app, '9100001');
   });
 
   afterAll(() => {
@@ -304,20 +306,15 @@ describe('dashboards (B1 / B2)', () => {
       addedBy: a!._id,
       assignedTo: a!._id,
     });
-    const list = (await get('/villages/pending', district).expect(200)).body.villages as {
+    // Gaon management is the Admin's (CTO 14 Nov 2026); a District only views.
+    await get('/villages/pending', district).expect(403);
+    const list = (await get('/villages/pending', admin).expect(200)).body.villages as {
       id: string;
     }[];
     expect(list.map((x) => x.id)).toContain(String(pending._id));
     await get('/villages/pending', zimmedar).expect(403);
-    await get('/villages/pending', larkanaDistrict)
-      .expect(200)
-      .expect((r) => {
-        expect((r.body.villages as { id: string }[]).map((x) => x.id)).not.toContain(
-          String(pending._id),
-        );
-      });
-    await post(`/villages/${String(pending._id)}/approve`, larkanaDistrict).expect(404);
-    const ok = await post(`/villages/${String(pending._id)}/approve`, district, {
+    await post(`/villages/${String(pending._id)}/approve`, district).expect(403);
+    const ok = await post(`/villages/${String(pending._id)}/approve`, admin, {
       name: 'گوٹھ نیا گاؤں خورد',
     }).expect(200);
     expect(ok.body.village).toMatchObject({ status: 'approved', name: 'گوٹھ نیا گاؤں خورد' });
@@ -334,9 +331,12 @@ describe('dashboards (B1 / B2)', () => {
       status: 'approved',
     });
     await post(`/villages/${String(pool._id)}/assign`, district, { userId: String(b!._id) }).expect(
+      403,
+    );
+    await post(`/villages/${String(pool._id)}/assign`, admin, { userId: String(b!._id) }).expect(
       200,
     );
-    await post(`/villages/${String(pool._id)}/assign`, district, { userId: String(a!._id) }).expect(
+    await post(`/villages/${String(pool._id)}/assign`, admin, { userId: String(a!._id) }).expect(
       200,
     );
     expect(String((await Village.findById(pool._id).lean())!.assignedTo)).toBe(String(a!._id));
@@ -349,12 +349,12 @@ describe('dashboards (B1 / B2)', () => {
     ]);
     // Only a zimmedar of the village's own district.
     const larkanaZ = await User.findOne({ role: 'zimmedar', unitCode: 'LARKANA_DIST' }).lean();
-    await post(`/villages/${String(pool._id)}/assign`, division, {
+    await post(`/villages/${String(pool._id)}/assign`, admin, {
       userId: String(larkanaZ!._id),
     }).expect(409);
 
     // Merge the pool village into the approved one; it is kept as history, never deleted.
-    await post(`/villages/${String(pool._id)}/merge`, district, {
+    await post(`/villages/${String(pool._id)}/merge`, admin, {
       intoId: String(pending._id),
     }).expect(200);
     expect(await Village.findById(pool._id).lean()).toMatchObject({ status: 'merged' });
@@ -372,8 +372,9 @@ describe('dashboards (B1 / B2)', () => {
     const cookie = await loginCookie(app, z!.ajeerCode);
     await get('/meta', cookie).expect(200);
     await post(`/users/${String(z!._id)}/status`, zimmedar, { isActive: false }).expect(403);
-    await post(`/users/${String(z!._id)}/status`, larkanaDistrict, { isActive: false }).expect(404);
-    await post(`/users/${String(z!._id)}/status`, district, { isActive: false }).expect(200);
+    await post(`/users/${String(z!._id)}/status`, larkanaDistrict, { isActive: false }).expect(403);
+    await post(`/users/${String(z!._id)}/status`, district, { isActive: false }).expect(403);
+    await post(`/users/${String(z!._id)}/status`, admin, { isActive: false }).expect(200);
     await get('/meta', cookie).expect(401);
     expect(await AuditLog.countDocuments({ action: 'USER_STATUS', targetId: String(z!._id) })).toBe(
       1,
@@ -381,7 +382,7 @@ describe('dashboards (B1 / B2)', () => {
     const rows = (await get('/dash/units/GHOTKI/zimmedaran', district).expect(200)).body
       .rows as Row[];
     expect(rows.map((r) => r.id)).not.toContain(String(z!._id));
-    await post(`/users/${String(z!._id)}/status`, district, { isActive: true }).expect(200);
+    await post(`/users/${String(z!._id)}/status`, admin, { isActive: true }).expect(200);
     await get('/meta', cookie).expect(401); // a session from before the deactivation stays ended
     await loginCookie(app, z!.ajeerCode);
   });
