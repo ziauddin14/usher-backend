@@ -388,3 +388,16 @@ days it was done. Counted from submitted amli jadwals (earlier days too). The zi
 - Accounts: `pnpm provision:pakistan-admin <ajeerCode> --name "<name>" --admin --nomination <ref>
   --approval <ref> --operator "<who>" --db live --confirm=ushr_live` (creates only; audited
   `USER_PROVISION`). Demo Admin: 9100001 (invented).
+
+## Wusooli per donor (CTO 16 Nov 2026)
+
+- Every wusooli without a mad names one donor: `donorId` (an old donor of the Gaon on that day) or
+  `newDonorName` (a new donor of the same visit) — checked like a niyyat (`checkNiyyatDonors`).
+  GSB stays apart (no donor). Entries with a mad saved before 13 Nov 2026 are unchanged.
+- On submit (`recordDonorWusooli`, `donors/pledges.ts`): the donor gets `lastWusooli` (date, naqd,
+  jins text; a back-dated day never replaces a later one) and the donor's niyyat still open from
+  before that day close on their own (`received.byWusooli: true`).
+- `GET /villages/:id/donors` returns `lastWusooli`; the ERP detail's `byDonor` adds `written` (what
+  UsherDesk has per donor name, loosely matched); the zimmedaran and month Excel files get a
+  "Donor wusooli" sheet (`reports/donor-wusooli.ts`). Never a donor's mobile.
+- Admin correction: entries removed in the same correction no longer block moving a visit.
