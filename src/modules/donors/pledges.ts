@@ -20,10 +20,12 @@ interface NiyyatEntry {
 
 /** A niyyat per donor (not one with a mad, saved before 13 Nov 2026). */
 const perDonor = (e: NiyyatEntry) => e.type === 'niyyat' && !e.category;
+/** An entry that names its donor: a niyyat or (CTO 16 Nov 2026) a wusooli without a mad. */
+const hasDonor = (e: NiyyatEntry) => !e.category;
 
 /**
- * Atiyat step: each niyyat's donor must be an old donor of the Gaon on that day, or one of the new
- * donors already saved on this visit's donors step.
+ * Atiyat step: the donor of each niyyat and each wusooli must be an old donor of the Gaon on that
+ * day, or one of the new donors already saved on this visit's donors step.
  */
 export async function checkNiyyatDonors(
   villageId: Types.ObjectId,
@@ -31,7 +33,7 @@ export async function checkNiyyatDonors(
   entries: NiyyatEntry[],
   newDonorNames: string[],
 ): Promise<void> {
-  const list = entries.filter(perDonor);
+  const list = entries.filter(hasDonor);
   const ids = [...new Set(list.flatMap((e) => (e.donorId ? [String(e.donorId)] : [])))];
   await checkMetDonors(
     villageId,
@@ -64,6 +66,72 @@ export async function checkClosePledges(
       });
     }
   }
+}
+
+/**
+ * After a jadwal is submitted (CTO 16 Nov 2026): each donor who gave wusooli gets it as the latest
+ * wusooli, and the donor's niyyat still open from before that day close on their own ("wusool",
+ * marked byWusooli). A later wusooli is never replaced by an earlier (back-dated) one.
+ */
+export async function recordDonorWusooli(
+  jadwal: Pick<JadwalDoc, 'date' | 'visits'> & { _id: Types.ObjectId },
+): Promise<void> {
+  const byDonor = new Map<string, { naqd: number; jins: string[] }>();
+  for (const visit of jadwal.visits) {
+    for (const e of visit.atiyat?.entries ?? []) {
+      if (e.type !== 'wusooli' || e.category) continue;
+      let donorId = e.donorId ? String(e.donorId) : null;
+      if (!donorId && e.newDonorName) {
+        const d = await Donor.findOne({
+          villageId: visit.villageId,
+          nameKey: villageNameKey(e.newDonorName),
+        })
+          .select('_id')
+          .lean();
+        donorId = d ? String(d._id) : null;
+      }
+      if (!donorId) continue;
+      const sum = byDonor.get(donorId) ?? { naqd: 0, jins: [] };
+      if (e.kind === 'naqd') sum.naqd += e.amount;
+      else
+        sum.jins.push(
+          `${e.qty ?? ''} ${e.unit ?? ''} ${e.detail ?? ''}`.replace(/ +/g, ' ').trim(),
+        );
+      byDonor.set(donorId, sum);
+    }
+  }
+  if (byDonor.size === 0) return;
+  const ids = [...byDonor.keys()].map((id) => new Types.ObjectId(id));
+  await Donor.bulkWrite(
+    [...byDonor.entries()].map(([id, sum]) => ({
+      updateOne: {
+        filter: {
+          _id: new Types.ObjectId(id),
+          $or: [{ lastWusooli: { $exists: false } }, { 'lastWusooli.date': { $lte: jadwal.date } }],
+        },
+        update: {
+          $set: {
+            lastWusooli: {
+              date: jadwal.date,
+              jadwalId: jadwal._id,
+              naqd: sum.naqd,
+              ...(sum.jins.length ? { jins: sum.jins } : {}),
+            },
+          },
+        },
+      },
+    })),
+    { ordered: false },
+  );
+  await Pledge.updateMany(
+    { donorId: { $in: ids }, status: 'open', date: { $lt: jadwal.date } },
+    {
+      $set: {
+        status: 'received',
+        received: { date: jadwal.date, jadwalId: jadwal._id, byWusooli: true },
+      },
+    },
+  );
 }
 
 /**

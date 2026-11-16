@@ -53,6 +53,21 @@ const donorSchema = new Schema(
         { _id: false },
       ),
     },
+    /**
+     * The latest wusooli from this donor (CTO 16 Nov 2026): its date, jadwal, naqd rupees and jins
+     * items as text (e.g. "40 من گندم").
+     */
+    lastWusooli: {
+      type: new Schema(
+        {
+          date: { type: String, required: true },
+          jadwalId: { type: Schema.Types.ObjectId, ref: 'Jadwal', required: true },
+          naqd: { type: Number, required: true, min: 0 },
+          jins: { type: [String], default: undefined },
+        },
+        { _id: false },
+      ),
+    },
     isActive: { type: Boolean, required: true, default: true },
   },
   { timestamps: true },

@@ -7,8 +7,10 @@ import { Donor } from '../../models/donor.js';
 import { Jadwal } from '../../models/jadwal.js';
 import { Pledge } from '../../models/pledge.js';
 import { User } from '../../models/user.js';
+import { Types } from 'mongoose';
 import { Village } from '../../models/village.js';
 import { seedDemo } from '../../seed/seed.js';
+import { recordDonorWusooli } from './pledges.js';
 
 // CTO 13 Nov 2026: niyyat per donor — عشر / عطیہ, naqd or jins, the month it is expected; open
 // niyyat shown with the donor; closed with "وصول ہو گئی"; reports. Invented data.
@@ -181,5 +183,60 @@ describe('niyyat per donor', () => {
     const unit = await as(district).get('/dash/units/GHOTKI/pledges?period=month').expect(200);
     expect(unit.body.open.count).toBe(1);
     expect(unit.body.received.count).toBe(1);
+  });
+
+  it('a wusooli from a donor is his latest wusooli and closes his open niyyat by itself (CTO 16 Nov)', async () => {
+    const open = await Pledge.findOne({ status: 'open' }).lean();
+    expect(open).toBeTruthy();
+    const donorId = open!.donorId;
+    const vid = new Types.ObjectId(villageId);
+    const day = (date: string, amount: number) => ({
+      _id: new Types.ObjectId(),
+      date,
+      visits: [
+        {
+          villageId: vid,
+          atiyat: {
+            entries: [
+              { type: 'wusooli' as const, kind: 'naqd' as const, amount, donorId },
+              {
+                type: 'wusooli' as const,
+                kind: 'jins' as const,
+                amount: 0,
+                detail: 'گندم',
+                qty: 5,
+                unit: 'من',
+                donorId,
+              },
+            ],
+          },
+        },
+      ],
+    });
+    // A wusooli on the niyyat's own day (or before it) leaves the niyyat open.
+    await recordDonorWusooli(day(open!.date, 1000) as never);
+    expect((await Pledge.findById(open!._id).lean())!.status).toBe('open');
+
+    const later = addDays(open!.date, 2);
+    await recordDonorWusooli(day(later, 3000) as never);
+    expect(await Pledge.findById(open!._id).lean()).toMatchObject({
+      status: 'received',
+      received: { date: later, byWusooli: true },
+    });
+    expect((await Donor.findById(donorId).lean())!.lastWusooli).toMatchObject({
+      date: later,
+      naqd: 3000,
+      jins: ['5 من گندم'],
+    });
+    // An earlier (back-dated) wusooli never replaces a later one.
+    await recordDonorWusooli(day(addDays(later, -1), 7) as never);
+    expect((await Donor.findById(donorId).lean())!.lastWusooli!.naqd).toBe(3000);
+
+    // The zimmedar sees it with the donor in the Gaon's list.
+    const list = await as(arif).get(`/villages/${villageId}/donors?date=${today}`).expect(200);
+    const d = (list.body.donors as { id: string; lastWusooli: unknown }[]).find(
+      (x) => x.id === String(donorId),
+    );
+    if (d) expect(d.lastWusooli).toMatchObject({ date: later, naqd: 3000, jins: ['5 من گندم'] });
   });
 });

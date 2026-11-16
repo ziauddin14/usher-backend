@@ -330,22 +330,51 @@ describe('village tasks', () => {
     await put('donors', { oldMet: 0, newDonors: [{ name: 'x', mobile: '12345' }] }).expect(400);
   });
 
-  it('atiyat: wusooli without a mad — the naqd total and jins items (CTO 13 Nov 2026)', async () => {
+  it('atiyat: wusooli per donor — naqd and jins, each with its donor (CTO 16 Nov 2026)', async () => {
+    await put('donors', { oldMet: 0, newDonors: [{ name: 'علی نواز' }] }).expect(200);
     const res = await put('atiyat', {
       entries: [
-        { type: 'wusooli', kind: 'naqd', amount: 50000 },
-        { type: 'wusooli', kind: 'jins', amount: 0, detail: 'گندم', qty: 40, unit: 'من' },
+        { type: 'wusooli', kind: 'naqd', amount: 50000, newDonorName: 'علی نواز' },
+        {
+          type: 'wusooli',
+          kind: 'jins',
+          amount: 0,
+          detail: 'گندم',
+          qty: 40,
+          unit: 'من',
+          newDonorName: 'علی نواز',
+        },
       ],
     }).expect(200);
+    // No donor, two donors, or a name that is not a donor of this visit: refused.
+    await put('atiyat', { entries: [{ type: 'wusooli', kind: 'naqd', amount: 100 }] }).expect(400);
+    await put('atiyat', {
+      entries: [
+        {
+          type: 'wusooli',
+          kind: 'naqd',
+          amount: 100,
+          newDonorName: 'علی نواز',
+          donorId: '0123456789abcdef01234567',
+        },
+      ],
+    }).expect(400);
+    await put('atiyat', {
+      entries: [{ type: 'wusooli', kind: 'naqd', amount: 100, newDonorName: 'کوئی اور' }],
+    }).expect(400);
     expect(res.body.visit.atiyat.entries[1]).toMatchObject({ detail: 'گندم', qty: 40, unit: 'من' });
     // Jins needs what and how much; naqd at least Rs 1; niyyat still needs its mad.
     await put('atiyat', {
-      entries: [{ type: 'wusooli', kind: 'jins', amount: 100, detail: 'گندم' }],
+      entries: [
+        { type: 'wusooli', kind: 'jins', amount: 100, detail: 'گندم', newDonorName: 'علی نواز' },
+      ],
     }).expect(400);
-    await put('atiyat', { entries: [{ type: 'wusooli', kind: 'naqd', amount: 0 }] }).expect(400);
+    await put('atiyat', {
+      entries: [{ type: 'wusooli', kind: 'naqd', amount: 0, newDonorName: 'علی نواز' }],
+    }).expect(400);
     await put('atiyat', { entries: [{ type: 'niyyat', kind: 'naqd', amount: 100 }] }).expect(400);
     await put('atiyat', {
-      entries: [{ type: 'wusooli', kind: 'naqd', amount: 100, qty: 2 }],
+      entries: [{ type: 'wusooli', kind: 'naqd', amount: 100, qty: 2, newDonorName: 'علی نواز' }],
     }).expect(400);
   });
 

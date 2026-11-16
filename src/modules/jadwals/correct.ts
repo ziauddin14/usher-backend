@@ -68,10 +68,14 @@ export async function correctJadwal(caller: AuthUser, id: string, body: Body) {
       continue;
     }
     if (v.villageId && v.villageId !== String(visit.villageId)) {
+      // Entries removed in this same correction do not count.
+      const removing = new Set((v.entries ?? []).filter((e) => e.remove).map((e) => e.index));
       const hasDonors =
         (visit.donors?.met?.length ?? 0) > 0 ||
         (visit.donors?.newDonors?.length ?? 0) > 0 ||
-        (visit.atiyat?.entries ?? []).some((e) => e.donorId || e.newDonorName);
+        (visit.atiyat?.entries ?? []).some(
+          (e, i) => !removing.has(i) && (e.donorId || e.newDonorName),
+        );
       if (hasDonors) {
         throw conflict('This visit has donor records — reopen the day instead', 'VISIT_HAS_DONORS');
       }
