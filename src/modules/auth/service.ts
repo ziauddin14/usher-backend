@@ -23,6 +23,8 @@ export interface PublicUser {
   role: AuthUser['role'];
   zimmedari?: AuthUser['zimmedari'];
   unit: { code: string; name: string; nameUr?: string; path: string; level: string };
+  /** Extra units the viewer may open besides their own (CTO 17 Nov 2026). */
+  extraUnits?: { code: string; name: string; nameUr?: string; path: string; level: string }[];
   mustChangePassword: boolean;
 }
 
@@ -40,6 +42,19 @@ export async function publicUser(user: AuthUser): Promise<PublicUser> {
     );
     throw new AppError(500, 'INTERNAL', 'User unit missing');
   }
+  const extraDocs = user.extraUnitPaths?.length
+    ? await Unit.find({ path: { $in: user.extraUnitPaths } })
+        .select('code name nameUr path level')
+        .sort({ name: 1 })
+        .lean()
+    : [];
+  const extra = extraDocs.map((u) => ({
+    code: u.code,
+    name: u.name,
+    ...(u.nameUr ? { nameUr: u.nameUr } : {}),
+    path: u.path,
+    level: u.level,
+  }));
   return {
     id: user.id,
     ajeerCode: user.ajeerCode,
@@ -54,6 +69,7 @@ export async function publicUser(user: AuthUser): Promise<PublicUser> {
       path: unit.path,
       level: unit.level,
     },
+    ...(extra.length ? { extraUnits: extra } : {}),
     mustChangePassword: user.mustChangePassword,
     ...(user.department ? { department: user.department } : {}),
     ...(user.isTest ? { isTest: true } : {}),
@@ -113,6 +129,7 @@ export async function login(ajeerCode: string, password: string, ip: string | un
     sessionVersion: user.sessionVersion ?? 0,
     ...(user.department ? { department: user.department } : {}),
     ...(user.isTest ? { isTest: true } : {}),
+    ...(user.extraUnitPaths?.length ? { extraUnitPaths: user.extraUnitPaths } : {}),
   };
   return authUser;
 }

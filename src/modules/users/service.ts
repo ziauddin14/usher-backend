@@ -47,7 +47,7 @@ export async function listUsers(caller: AuthUser, opts: { unit?: string; q?: str
 
   const users = await User.find(filter)
     .select(
-      'ajeerCode ajeerCodeFull name nameUr fatherName mobile role zimmedari unitCode isActive mustChangePassword lastLoginAt',
+      'ajeerCode ajeerCodeFull name nameUr fatherName mobile role zimmedari unitCode isActive mustChangePassword lastLoginAt extraUnitPaths',
     )
     .sort({ unitCode: 1, ajeerCode: 1 })
     .limit(500)
@@ -67,6 +67,8 @@ export async function listUsers(caller: AuthUser, opts: { unit?: string; q?: str
     isActive: u.isActive,
     mustChangePassword: u.mustChangePassword,
     lastLoginAt: u.lastLoginAt,
+    // Extra units this user may view (CTO 17 Nov 2026), as unit codes.
+    extraUnitCodes: (u.extraUnitPaths ?? []).map((p) => p.split('/').pop()!),
   }));
 }
 

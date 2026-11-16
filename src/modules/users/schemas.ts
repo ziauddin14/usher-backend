@@ -8,6 +8,13 @@ export const listUsersQuery = z.object({
   q: z.string().trim().max(60).optional(),
 });
 
+/** PUT /users/:id/extra-units (Admin, CTO 17 Nov 2026): the whole list; [] removes all. */
+export const extraUnitsSchema = z.object({
+  unitCodes: z.array(z.string().regex(/^[A-Z0-9_]+$/)).max(5),
+});
+
+export const unitsQuery = z.object({ level: z.enum(['suba', 'division', 'district']) });
+
 export const statusSchema = z.object({ isActive: z.boolean() });
 
 export const userIdParams = z.object({ id: z.string().regex(/^[a-f0-9]{24}$/i) });

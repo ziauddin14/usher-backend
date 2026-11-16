@@ -76,6 +76,12 @@ const userSchema = new Schema(
     /** Only on centrally provisioned accounts (see DEPARTMENTS). */
     department: { type: String, enum: DEPARTMENTS },
     /**
+     * Extra units a District / Division / Suba user may view besides their own (CTO 17 Nov 2026:
+     * a Division zimmedar given a second Division as an honorary charge). View only, like their own
+     * unit; set by the Admin, each one the same level as the user's own unit.
+     */
+    extraUnitPaths: { type: [String], default: undefined },
+    /**
      * How a centrally provisioned (pakistan-level) account came to exist: the nomination and its
      * administrative confirmation (document references), who provisioned it and when.
      */

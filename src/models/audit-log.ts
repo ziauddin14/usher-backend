@@ -34,6 +34,7 @@ export const AUDIT_ACTIONS = [
   // new zimmedar account created on the dashboard.
   'JADWAL_CORRECT',
   'USER_CREATE',
+  'USER_EXTRA_UNITS',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

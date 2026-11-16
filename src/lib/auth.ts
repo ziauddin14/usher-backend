@@ -26,6 +26,8 @@ export interface AuthUser {
   isTest?: boolean;
   /** Department of a centrally provisioned account (e.g. CENTRAL_IT), re-read on every request. */
   department?: Department;
+  /** Extra units this viewer may see besides their own (users.extraUnitPaths, CTO 17 Nov 2026). */
+  extraUnitPaths?: string[];
 }
 
 interface TokenPayload {
@@ -110,7 +112,7 @@ async function loadSessionUser(req: Request): Promise<void> {
   await connectDb();
   const user = await User.findById(payload.sub)
     .select(
-      'ajeerCode name nameUr role zimmedari unitCode unitPath isActive mustChangePassword sessionVersion department isTest',
+      'ajeerCode name nameUr role zimmedari unitCode unitPath isActive mustChangePassword sessionVersion department isTest extraUnitPaths',
     )
     .lean();
   if (!user?.isActive || (payload.sv ?? 0) !== (user.sessionVersion ?? 0)) {
@@ -129,6 +131,7 @@ async function loadSessionUser(req: Request): Promise<void> {
     sessionVersion: user.sessionVersion ?? 0,
     ...(user.department ? { department: user.department } : {}),
     ...(user.isTest ? { isTest: true } : {}),
+    ...(user.extraUnitPaths?.length ? { extraUnitPaths: user.extraUnitPaths } : {}),
   };
 }
 
