@@ -401,3 +401,25 @@ days it was done. Counted from submitted amli jadwals (earlier days too). The zi
   UsherDesk has per donor name, loosely matched); the zimmedaran and month Excel files get a
   "Donor wusooli" sheet (`reports/donor-wusooli.ts`). Never a donor's mobile.
 - Admin correction: entries removed in the same correction no longer block moving a visit.
+
+## Extra units and all-Gaon list (CTO 17 Nov 2026)
+
+**Extra units (view only).** A District, Division or Suba user can be given more units of their own
+level, e.g. a Division zimmedar who holds a second Division as an honorary charge.
+- Stored on `users.extraUnitPaths`. `scopeFilter` / `isInScope` accept every root: the own unit and
+  each extra unit (one anchored prefix per root, `$in`). Nothing else changes: they see the extra
+  unit exactly like their own (dashboard, Gaon list, Excel / PDF, WhatsApp share), view only.
+- `/auth/me` returns `extraUnits`; the dashboard shows a "Mere units" switch.
+- Admin only: `GET /users/units?level=division` (choices), `PUT /users/:id/extra-units
+  { unitCodes }` (the whole list; `[]` removes all; at most 5). Each unit must be active, of the
+  user's own level and not their own unit (`EXTRA_UNIT_INVALID`); only District / Division / Suba
+  users (`EXTRA_UNITS_NOT_ALLOWED`). Audit `USER_EXTRA_UNITS` with the codes before and after.
+- `GET /users` lists `extraUnitCodes`.
+
+**All Gaon with filters.** `GET /dash/villages` (every dashboard role, in scope): `suba`,
+`division`, `district` (the narrowest wins), `assigned=yes|no|orphaned` (active zimmedar / none /
+inactive zimmedar), `issue=yes|no|<kind>`, `visited=yes|no` (a submitted visit this month),
+`status=approved|pending`, `q` (name), `page` (50 per page). It returns the rows (Suba / Division /
+District names, zimmedar, problems) and `counts` for the unit and name filters, so each filter shows
+how many it gives. `GET /dash/units-tree` gives the Suba / Division / District units in scope for the
+filters.

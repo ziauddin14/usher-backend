@@ -40,3 +40,33 @@ export const exportQuery = z
     month: month.optional(),
   })
   .superRefine(refineRange);
+
+const unitCode = z.string().regex(/^[A-Z0-9_]{2,40}$/);
+
+/**
+ * GET /dash/villages (CTO 17 Nov 2026): every Gaon in scope, filtered — Suba / Division / District,
+ * zimmedar (assigned, pool, inactive zimmedar), problem (any, none, one kind), visit this month,
+ * status, name. 50 per page.
+ */
+export const villageBrowseQuery = z.object({
+  suba: unitCode.optional(),
+  division: unitCode.optional(),
+  district: unitCode.optional(),
+  assigned: z.enum(['yes', 'no', 'orphaned']).optional(),
+  issue: z
+    .enum([
+      'yes',
+      'no',
+      'ZIMMEDAR_NOT_FOUND',
+      'NOT_IMPORTED_EMPLOYEE',
+      'SUPERVISOR_CODE',
+      'DISTRICT_MISMATCH',
+      'SIMILAR_NAME',
+    ])
+    .optional(),
+  visited: z.enum(['yes', 'no']).optional(),
+  status: z.enum(['approved', 'pending']).optional(),
+  q: z.string().trim().max(60).optional(),
+  page: z.coerce.number().int().min(1).max(1000).default(1),
+});
+export type VillageBrowseQuery = z.infer<typeof villageBrowseQuery>;

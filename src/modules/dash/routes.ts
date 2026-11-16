@@ -2,7 +2,15 @@ import { Router } from 'express';
 import { currentUser, DASHBOARD_ROLES, requireAuth, requireRole } from '../../lib/auth.js';
 import { parse } from '../../lib/errors.js';
 import { dashExport } from './export.js';
-import { exportQuery, monthQuery, periodQuery, unitParams, userParams } from './schemas.js';
+import {
+  exportQuery,
+  monthQuery,
+  periodQuery,
+  unitParams,
+  userParams,
+  villageBrowseQuery,
+} from './schemas.js';
+import { browseVillages, unitsTree } from './villages.js';
 import { unitErp, userErp } from '../erp/service.js';
 import {
   childrenTable,
@@ -76,6 +84,16 @@ export function dashRouter(): Router {
     const { userId } = parse(userParams, req.params);
     const { month } = parse(monthQuery, req.query);
     res.json(await zimmedarDays(currentUser(req), userId, month));
+  });
+
+  /** Every Gaon in scope with filters (CTO 17 Nov 2026). */
+  router.get('/villages', async (req, res) => {
+    res.json(await browseVillages(currentUser(req), parse(villageBrowseQuery, req.query)));
+  });
+
+  /** Suba, Division and District units in scope, for the filters. */
+  router.get('/units-tree', async (req, res) => {
+    res.json({ units: await unitsTree(currentUser(req)) });
   });
 
   router.get('/export.xlsx', async (req, res) => {
