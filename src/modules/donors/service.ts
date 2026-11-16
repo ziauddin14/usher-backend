@@ -11,7 +11,7 @@ import { Donor, type DonorDoc } from '../../models/donor.js';
 import type { JadwalDoc } from '../../models/jadwal.js';
 import { Village } from '../../models/village.js';
 import { findUsableVillage } from '../villages/service.js';
-import { openPledgesOf, recordPledges } from './pledges.js';
+import { openPledgesOf, recordDonorWusooli, recordPledges } from './pledges.js';
 
 /**
  * Old donors of a Gaon on `date`: every imported donor, and a donor a zimmedar added on an earlier
@@ -34,7 +34,7 @@ export async function villageDonors(user: AuthUser, villageId: string, date?: st
   const village = await Village.findById(usable._id).select('name localZimmedar').lean();
   const [donors, pledges] = await Promise.all([
     Donor.find(oldOn(usable._id, date ?? karachiDate()))
-      .select('name mobile acres source.kind meetings lastMet')
+      .select('name mobile acres source.kind meetings lastMet lastWusooli')
       .sort({ nameKey: 1 })
       .lean(),
     openPledgesOf(usable._id),
@@ -69,6 +69,14 @@ export async function villageDonors(user: AuthUser, villageId: string, date?: st
         dueMonth: p.dueMonth,
         date: p.date,
       })),
+      // The latest wusooli from the donor (CTO 16 Nov 2026).
+      lastWusooli: d.lastWusooli
+        ? {
+            date: d.lastWusooli.date,
+            naqd: d.lastWusooli.naqd,
+            jins: d.lastWusooli.jins ?? [],
+          }
+        : null,
       lastMet: d.lastMet
         ? {
             date: d.lastMet.date,
@@ -182,4 +190,6 @@ export async function recordDonorMeetings(
   if (writes.length > 0) await Donor.bulkWrite(writes, { ordered: false });
   // Then the day's niyyat (a new donor's niyyat needs the donor just added) — CTO 13 Nov 2026.
   await recordPledges(jadwal, pathOf);
+  // And the day's wusooli per donor (CTO 16 Nov 2026).
+  await recordDonorWusooli(jadwal);
 }

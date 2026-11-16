@@ -1,11 +1,17 @@
 // GET /dash/export.xlsx — the dashboard tables as Excel (Roman Urdu headers, as on the screen)
 // with a totals row. Data comes from the same service functions as the screens.
 import ExcelJS from 'exceljs';
+import { Types } from 'mongoose';
 import type { AuthUser } from '../../lib/auth.js';
 import { AppError } from '../../lib/errors.js';
 import type { Kpis } from '../me/service.js';
 import type { DashPeriod } from './schemas.js';
 import { addTaskSheet, type TaskCounts } from '../reports/tasks.js';
+import {
+  addDonorWusooliSheet,
+  type DonorWusooliRow,
+  donorWusooli,
+} from '../reports/donor-wusooli.js';
 import {
   childrenTable,
   percent,
@@ -36,6 +42,7 @@ async function workbook(
   rows: Cell[][],
   totals: Cell[],
   tasks?: TaskCounts,
+  donors?: DonorWusooliRow[],
 ) {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Report', { views: [{ state: 'frozen', ySplit: 2 }] });
@@ -50,6 +57,7 @@ async function workbook(
     c.numFmt = '#,##0';
   });
   if (tasks) addTaskSheet(wb, tasks);
+  if (donors) addDonorWusooliSheet(wb, donors);
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
@@ -129,6 +137,12 @@ export async function dashExport(
         kpi('km'),
         kpi('fare'),
       ],
+      undefined,
+      await donorWusooli(
+        { userId: new Types.ObjectId(d.user.id) },
+        `${d.month}-01`,
+        `${d.month}-31`,
+      ),
     );
     return { file, name: `UsherDesk-${d.user.ajeerCode}-${d.month}.xlsx` };
   }
@@ -185,6 +199,7 @@ export async function dashExport(
         '',
       ],
       await unitTasks(caller, q.code, q.period, q.date, q.from),
+      await donorWusooli({ unitPath: t.unit.path }, t.from, t.to),
     );
     return { file, name: `UsherDesk-${t.unit.code}-${t.period}-${span(t)}.xlsx` };
   }

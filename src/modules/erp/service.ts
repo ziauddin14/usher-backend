@@ -11,6 +11,7 @@ import { assertInScope, escapeRegex } from '../../lib/scope.js';
 import { getRewardRules, getSettings } from '../../lib/settings.js';
 import { karachiDate } from '../../lib/time.js';
 import { ErpReceipt, ErpUpload } from '../../models/erp-receipt.js';
+import { Donor } from '../../models/donor.js';
 import { Jadwal } from '../../models/jadwal.js';
 import { Unit, type UnitLevel } from '../../models/unit.js';
 import { User } from '../../models/user.js';
@@ -445,6 +446,62 @@ async function writtenWusooli(
   ]);
 }
 
+/**
+ * What one zimmedar wrote per donor in the period (CTO 16 Nov 2026: wusooli per donor), by donor
+ * name: naqd plus the jins value, from submitted days. Entries with a mad (before 13 Nov) have no
+ * donor and are left out.
+ */
+async function writtenByDonor(userId: Types.ObjectId, span: { from: string; to: string }) {
+  const rows = await Jadwal.aggregate<{
+    _id: { d: Types.ObjectId | null; n: string | null };
+    amount: number;
+  }>([
+    { $match: { userId, status: 'submitted', date: { $gte: span.from, $lte: span.to } } },
+    { $unwind: '$visits' },
+    { $unwind: '$visits.atiyat.entries' },
+    {
+      $match: {
+        'visits.atiyat.entries.type': 'wusooli',
+        'visits.atiyat.entries.category': { $exists: false },
+      },
+    },
+    {
+      $group: {
+        _id: {
+          d: { $ifNull: ['$visits.atiyat.entries.donorId', null] },
+          n: { $ifNull: ['$visits.atiyat.entries.newDonorName', null] },
+        },
+        amount: { $sum: '$visits.atiyat.entries.amount' },
+      },
+    },
+  ]);
+  const ids = rows.flatMap((r) => (r._id.d ? [r._id.d] : []));
+  const names = new Map(
+    (
+      await Donor.find({ _id: { $in: ids } })
+        .select('name')
+        .lean()
+    ).map((d) => [String(d._id), d.name]),
+  );
+  const out = new Map<string, { name: string; amount: number }>();
+  for (const r of rows) {
+    const name = r._id.d ? names.get(String(r._id.d)) : r._id.n;
+    if (!name) continue;
+    const key = donorKey(name);
+    const row = out.get(key) ?? { name, amount: 0 };
+    row.amount += r.amount;
+    out.set(key, row);
+  }
+  return out;
+}
+
+/** Donor names compared loosely: case, spaces and dots do not matter. */
+const donorKey = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/[.\s]+/g, ' ')
+    .trim();
+
 /** Receipt lines listed on a zimmedar's own screen (newest first). */
 const MAX_OWN_LINES = 300;
 
@@ -457,7 +514,7 @@ type Query = { period: SummaryPeriod; date?: string | undefined; from?: string |
 async function erpOfUser(userId: Types.ObjectId, q: Query) {
   const span = await range(q.period, q.date, q.from);
   const match = { userId, date: { $gte: span.from, $lte: span.to }, cancelled: false };
-  const [lines, mads, last, written] = await Promise.all([
+  const [lines, mads, last, written, perDonor] = await Promise.all([
     ErpReceipt.find(match)
       .select('receiptNo lineNo date kind amount mad donorName item qty qtyUnit')
       .sort({ date: -1, receiptNo: 1, lineNo: 1 })
@@ -465,6 +522,7 @@ async function erpOfUser(userId: Types.ObjectId, q: Query) {
     byMad(match),
     lastUpload(),
     writtenWusooli({ userId }, span),
+    writtenByDonor(userId, span),
   ]);
   const totals = { ...emptySums(), written: written.reduce((s, w) => s + w.wusooli, 0) };
   totals.entries = lines.length;
@@ -492,9 +550,21 @@ async function erpOfUser(userId: Types.ObjectId, q: Query) {
     ...span,
     totals,
     byMad: mads,
-    byDonor: [...donors.values()]
-      .map(({ receipts, ...d }) => ({ ...d, receipts: receipts.size }))
-      .sort((a, b) => b.naqd + b.jins - (a.naqd + a.jins)),
+    // Per donor (CTO 16 Nov 2026): what the zimmedar wrote next to what the ERP shows, by name.
+    byDonor: (() => {
+      const rows = [...donors.values()].map(({ receipts, ...d }) => {
+        const key = d.donor ? donorKey(d.donor) : '';
+        const w = key ? perDonor.get(key) : undefined;
+        if (key) perDonor.delete(key);
+        return { ...d, receipts: receipts.size, written: w?.amount ?? 0 };
+      });
+      for (const w of perDonor.values()) {
+        rows.push({ donor: w.name, naqd: 0, jins: 0, receipts: 0, written: w.amount });
+      }
+      return rows.sort(
+        (a, b) => Math.max(b.naqd + b.jins, b.written) - Math.max(a.naqd + a.jins, a.written),
+      );
+    })(),
     lines: lines.slice(0, MAX_OWN_LINES).map(({ _id, ...l }) => ({
       ...l,
       mad: l.mad ?? null,

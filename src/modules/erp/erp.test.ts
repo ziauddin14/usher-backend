@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { Types } from 'mongoose';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { loginCookie } from '../../../test/helpers.js';
@@ -234,7 +235,20 @@ describe('ERP receipts upload and reports', () => {
       status: 'submitted',
       startedAt: new Date(),
       submittedAt: new Date(),
-      visits: [],
+      // Wusooli per donor (CTO 16 Nov 2026): one name as the ERP has it (any case), one the ERP
+      // does not have.
+      visits: [
+        {
+          villageId: new Types.ObjectId(),
+          villageName: 'گوٹھ آزمائش',
+          atiyat: {
+            entries: [
+              { type: 'wusooli', kind: 'naqd', amount: 50000, newDonorName: 'donor alif' },
+              { type: 'wusooli', kind: 'naqd', amount: 10000, newDonorName: 'Donor Jeem' },
+            ],
+          },
+        },
+      ],
       totals: { wusooli: 60000 },
     });
     await upload(
@@ -252,8 +266,9 @@ describe('ERP receipts upload and reports', () => {
     const own = await get(zimmedar, `/me/erp?${q}`).expect(200);
     expect(own.body.totals).toMatchObject({ naqd: 60000, written: 60000 });
     expect(own.body.byDonor).toEqual([
-      { donor: 'Donor Alif', naqd: 55000, jins: 0, receipts: 2 },
-      { donor: 'Donor Be', naqd: 5000, jins: 0, receipts: 1 },
+      { donor: 'Donor Alif', naqd: 55000, jins: 0, receipts: 2, written: 50000 },
+      { donor: 'Donor Jeem', naqd: 0, jins: 0, receipts: 0, written: 10000 },
+      { donor: 'Donor Be', naqd: 5000, jins: 0, receipts: 1, written: 0 },
     ]);
     expect(own.body.lines[0]).toMatchObject({ donorName: 'Donor Alif' });
 
@@ -272,7 +287,7 @@ describe('ERP receipts upload and reports', () => {
 
     const detail = await get(district, `/dash/zimmedaran/${String(me!._id)}/erp?${q}`).expect(200);
     expect(detail.body.user).toMatchObject({ ajeerCode: '9090412' });
-    expect(detail.body.byDonor).toHaveLength(2);
+    expect(detail.body.byDonor).toHaveLength(3); // two from the ERP, one only written in UsherDesk
     await get(larkana, `/dash/zimmedaran/${String(me!._id)}/erp?${q}`).expect(404);
   });
 

@@ -136,9 +136,22 @@ export const atiyatSchema = z
     (b) =>
       b.entries.every(
         (e) =>
-          e.type === 'niyyat' || (!e.niyyatType && !e.dueMonth && !e.donorId && !e.newDonorName),
+          e.type === 'niyyat' ||
+          (!e.niyyatType &&
+            !e.dueMonth &&
+            // Wusooli per donor (CTO 16 Nov 2026): one donor for each wusooli without a mad; an
+            // entry with a mad (saved before 13 Nov 2026) has none.
+            (e.category
+              ? !e.donorId && !e.newDonorName
+              : e.donorId
+                ? !e.newDonorName
+                : !!e.newDonorName)),
       ),
-    { message: 'donor, type and month are only for a niyyat', path: ['entries'] },
+    {
+      message:
+        'a wusooli needs its donor (one of donorId / newDonorName); type and month are only for a niyyat',
+      path: ['entries'],
+    },
   )
   .refine((b) => b.entries.every((e) => e.kind === 'jins' || e.amount >= 1), {
     message: 'a naqd amount must be at least 1',

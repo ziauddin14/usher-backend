@@ -7,6 +7,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loginCookie } from '../../../test/helpers.js';
 import { createApp } from '../../index.js';
 import { AuditLog } from '../../models/audit-log.js';
+import { Donor } from '../../models/donor.js';
 import { Jadwal } from '../../models/jadwal.js';
 import { User } from '../../models/user.js';
 import { Village } from '../../models/village.js';
@@ -124,11 +125,32 @@ describe('Admin: correcting a submitted jadwal', () => {
     id = start.body.jadwal.id as string;
     const v = await api(arif).post(`/jadwals/${id}/visits`, { villageId: arifVillages[0] });
     visitId = v.body.jadwal.visits[0].id as string;
+    // An old donor of the Gaon gives the wusooli (per donor since CTO 16 Nov 2026).
+    const gaon = await Village.findById(arifVillages[0]).lean();
+    const donor = await Donor.create({
+      villageId: gaon!._id,
+      unitPath: gaon!.unitPath,
+      name: 'Donor Tasheeh',
+      nameKey: 'donor tasheeh',
+      addedOn: '2026-01-01',
+      source: { kind: 'import' as const, file: 'donors.csv', at: new Date() },
+      meetings: 0,
+      isActive: true,
+    });
+    const donorId = String(donor._id);
     await api(arif)
       .put(`/jadwals/${id}/visits/${visitId}/atiyat`, {
         entries: [
-          { type: 'wusooli', kind: 'naqd', amount: 50000 },
-          { type: 'wusooli', kind: 'jins', amount: 0, detail: 'گندم', qty: 40, unit: 'من' },
+          { type: 'wusooli', kind: 'naqd', amount: 50000, donorId },
+          {
+            type: 'wusooli',
+            kind: 'jins',
+            amount: 0,
+            detail: 'گندم',
+            qty: 40,
+            unit: 'من',
+            donorId,
+          },
         ],
       })
       .expect(200);
@@ -176,16 +198,34 @@ describe('Admin: correcting a submitted jadwal', () => {
     expect((log!.details as { changes: string[] }).changes).toHaveLength(2);
   });
 
-  it('a visit with no donors can move to another Gaon of the District; a removed entry stops counting', async () => {
+  it('a visit moves to another Gaon only without donor records; removed entries stop counting', async () => {
     const other = arifVillages[1]!;
-    const res = await api(admin2)
+    // Its wusooli names a donor of this Gaon: reopen instead.
+    const blocked = await api(admin)
       .post(`/jadwals/${id}/correct`, {
         reason: 'Ghalat gaon chuna gaya tha',
         visits: [{ visitId, villageId: other, entries: [{ index: 0, remove: true }] }],
       })
+      .expect(409);
+    expect(blocked.body.error.details.reason).toBe('VISIT_HAS_DONORS');
+    // Removing both of the donor's entries in the same correction frees the visit.
+    const res = await api(admin2)
+      .post(`/jadwals/${id}/correct`, {
+        reason: 'Ghalat gaon chuna gaya tha',
+        visits: [
+          {
+            visitId,
+            villageId: other,
+            entries: [
+              { index: 0, remove: true },
+              { index: 1, remove: true },
+            ],
+          },
+        ],
+      })
       .expect(200);
     expect(res.body.jadwal.visits[0].villageId).toBe(other);
-    expect(res.body.jadwal.visits[0].atiyat.entries).toHaveLength(1);
+    expect(res.body.jadwal.visits[0].atiyat.entries).toHaveLength(0);
     expect(res.body.jadwal.totals.wusooli).toBe(0);
     expect(
       (res.body.jadwal.corrections as { byAjeerCode: string }[]).map((c) => c.byAjeerCode),

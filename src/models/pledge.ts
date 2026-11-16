@@ -35,6 +35,8 @@ const pledgeSchema = new Schema(
         {
           date: { type: String, required: true },
           jadwalId: { type: Schema.Types.ObjectId, ref: 'Jadwal', required: true },
+          /** Closed on its own by a wusooli from the donor (CTO 16 Nov 2026). */
+          byWusooli: { type: Boolean },
         },
         { _id: false },
       ),

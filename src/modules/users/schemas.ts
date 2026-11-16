@@ -14,7 +14,10 @@ export const userIdParams = z.object({ id: z.string().regex(/^[a-f0-9]{24}$/i) }
 
 /** POST /users (Admin): a new zimmedar. The mobile is optional (no verification). */
 export const createUserSchema = z.object({
-  ajeerCode: z.string().trim().regex(/^[0-9]{3,9}$/),
+  ajeerCode: z
+    .string()
+    .trim()
+    .regex(/^[0-9]{3,9}$/),
   name: z.string().trim().min(2).max(100),
   nameUr: z.string().trim().max(100).optional(),
   fatherName: z.string().trim().max(100).optional(),

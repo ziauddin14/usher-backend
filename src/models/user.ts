@@ -2,7 +2,15 @@ import mongoose, { type InferSchemaType, type Model, Schema } from 'mongoose';
 
 // 'tehsil' stays only for old records (no Tehsil level since CTO 13 Nov 2026). 'admin' (CTO 14 Nov
 // 2026): the Pakistan-level Admin who alone changes data; every other dashboard role only views.
-export const ROLES = ['zimmedar', 'tehsil', 'district', 'division', 'suba', 'pakistan', 'admin'] as const;
+export const ROLES = [
+  'zimmedar',
+  'tehsil',
+  'district',
+  'division',
+  'suba',
+  'pakistan',
+  'admin',
+] as const;
 export type Role = (typeof ROLES)[number];
 
 /**
