@@ -7,7 +7,15 @@ import {
   EDITOR_ROLES,
 } from '../../lib/auth.js';
 import { parse } from '../../lib/errors.js';
-import { createUserSchema, listUsersQuery, statusSchema, userIdParams } from './schemas.js';
+import {
+  createUserSchema,
+  extraUnitsSchema,
+  listUsersQuery,
+  statusSchema,
+  unitsQuery,
+  userIdParams,
+} from './schemas.js';
+import { listUnits, setExtraUnits } from './extra-units.js';
 import { createZimmedar, listDistricts } from './create.js';
 import { listResetRequests, listUsers, resetPassword, setUserStatus } from './service.js';
 
@@ -30,6 +38,18 @@ export function usersRouter(): Router {
 
   router.get('/districts', admin, async (req, res) => {
     res.json({ districts: await listDistricts(currentUser(req)) });
+  });
+
+  /** Units of one level, to give as extra view access (CTO 17 Nov 2026). */
+  router.get('/units', admin, async (req, res) => {
+    const { level } = parse(unitsQuery, req.query);
+    res.json({ units: await listUnits(currentUser(req), level) });
+  });
+
+  router.put('/:id/extra-units', admin, async (req, res) => {
+    const { id } = parse(userIdParams, req.params);
+    const { unitCodes } = parse(extraUnitsSchema, req.body);
+    res.json(await setExtraUnits(currentUser(req), id, unitCodes));
   });
 
   router.get('/reset-requests', admin, async (req, res) => {

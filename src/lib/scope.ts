@@ -3,7 +3,16 @@ import { AppError } from './errors.js';
 /** Anything with a unit path: the caller, a jadwal, a village, a unit. */
 export interface Scoped {
   unitPath: string;
+  /** Extra view roots of a viewer (users.extraUnitPaths, CTO 17 Nov 2026). */
+  extraUnitPaths?: string[] | null;
 }
+
+/** Every root of the caller's scope: their own unit, then any extra units. */
+export function scopeRoots(user: Scoped): string[] {
+  return [user.unitPath, ...(user.extraUnitPaths ?? [])];
+}
+
+const under = (root: string, path: string) => path === root || path.startsWith(`${root}/`);
 
 export function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -11,7 +20,12 @@ export function escapeRegex(value: string): string {
 
 /** True when `path` is the caller's own unit path or below it. */
 export function isInScope(user: Scoped, path: string): boolean {
-  return path === user.unitPath || path.startsWith(`${user.unitPath}/`);
+  return scopeRoots(user).some((root) => under(root, path));
+}
+
+/** The scope root that holds `path` (own unit first), or null when out of scope. */
+export function rootOf(user: Scoped, path: string): string | null {
+  return scopeRoots(user).find((root) => under(root, path)) ?? null;
 }
 
 /**
@@ -19,8 +33,11 @@ export function isInScope(user: Scoped, path: string): boolean {
  * `{ unitPath: { $regex: '^P(/|$)' } }` — an anchored prefix, so it can use the unitPath index.
  * Use it in every query on operational data.
  */
-export function scopeFilter(user: Scoped, field = 'unitPath'): Record<string, { $regex: string }> {
-  return { [field]: { $regex: `^${escapeRegex(user.unitPath)}(/|$)` } };
+export function scopeFilter(user: Scoped, field = 'unitPath'): Record<string, unknown> {
+  const roots = scopeRoots(user);
+  if (roots.length === 1) return { [field]: { $regex: `^${escapeRegex(user.unitPath)}(/|$)` } };
+  // One anchored prefix per root: `$in` keeps each one an index range.
+  return { [field]: { $in: roots.map((r) => new RegExp(`^${escapeRegex(r)}(/|$)`)) } };
 }
 
 /** Segments of a District unit path: PK / suba / division / district. */

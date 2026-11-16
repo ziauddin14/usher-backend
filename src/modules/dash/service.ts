@@ -5,7 +5,7 @@ import { Types } from 'mongoose';
 import type { AuthUser } from '../../lib/auth.js';
 import { connectDb } from '../../lib/db.js';
 import { AppError } from '../../lib/errors.js';
-import { assertInScope, districtPathOf, escapeRegex } from '../../lib/scope.js';
+import { assertInScope, districtPathOf, escapeRegex, rootOf } from '../../lib/scope.js';
 import { getRewardRules, getSettings } from '../../lib/settings.js';
 import { karachiDate } from '../../lib/time.js';
 import { Jadwal } from '../../models/jadwal.js';
@@ -120,9 +120,11 @@ async function breadcrumb(caller: AuthUser, unit: UnitInfo) {
     .select('code name nameUr level path')
     .lean();
   const byCode = new Map(units.map((u) => [u.code, u]));
+  // From the scope root that holds the unit: the own unit, or an extra unit (CTO 17 Nov 2026).
+  const root = rootOf(caller, unit.path) ?? caller.unitPath;
   return codes
     .map((c) => byCode.get(c))
-    .filter((u): u is NonNullable<typeof u> => !!u && u.path.length >= caller.unitPath.length)
+    .filter((u): u is NonNullable<typeof u> => !!u && u.path.length >= root.length)
     .map((u) => ({ code: u.code, name: u.name, nameUr: u.nameUr ?? null, level: u.level }));
 }
 
