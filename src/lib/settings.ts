@@ -8,6 +8,7 @@ import {
   DEFAULT_OTHER_WORK,
   type DonorTaskDef,
 } from '../modules/settings/donor-tasks.js';
+import { type CropDef, DEFAULT_CROPS } from '../modules/settings/crops.js';
 
 const TTL_MS = 60_000;
 
@@ -36,6 +37,13 @@ export async function getDonorTasks(): Promise<DonorTaskDef[]> {
 /** The day's other work in order (settings.otherWork, or the seed default while it has none). */
 export async function getOtherWork(): Promise<DonorTaskDef[]> {
   return ordered((await getSettings()).otherWork, DEFAULT_OTHER_WORK);
+}
+
+/** Crops of a Gaon in order (settings.crops, or the seed default while it has none). */
+export async function getCrops(): Promise<CropDef[]> {
+  const list = (await getSettings()).crops;
+  const crops = list && list.length > 0 ? (list as CropDef[]) : DEFAULT_CROPS;
+  return [...crops].sort((a, b) => a.order - b.order);
 }
 
 function ordered(list: unknown[] | null | undefined, fallback: DonorTaskDef[]): DonorTaskDef[] {

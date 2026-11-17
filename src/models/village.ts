@@ -50,10 +50,35 @@ const villageSchema = new Schema(
       ],
       default: undefined,
     },
-    /** The Gaon's local zimmedar (name, mobile) from Shoba Ushar's donor list (CTO 12 Nov 2026). */
+    /**
+     * The Gaon's local zimmedar (name, mobile) from Shoba Ushar's donor list (CTO 12 Nov 2026); a
+     * permanent person of the Gaon. Since CTO 17 Nov 2026 also filled in on the screens.
+     */
     localZimmedar: {
       type: new Schema({ name: { type: String }, mobile: { type: String } }, { _id: false }),
     },
+    /**
+     * Where the Gaon is (CTO 17 Nov 2026): the phone's GPS when a zimmedar adds the Gaon or presses
+     * the button in it, or a point the Admin marks (Google Maps link / coordinates).
+     */
+    location: {
+      type: new Schema(
+        {
+          lat: { type: Number, required: true },
+          lng: { type: Number, required: true },
+          /** GPS accuracy in metres, when the phone gives it. */
+          accuracy: { type: Number },
+          source: { type: String, enum: ['gps', 'admin'], required: true },
+          by: { type: Schema.Types.ObjectId, ref: 'User' },
+          at: { type: Date, required: true },
+        },
+        { _id: false },
+      ),
+    },
+    /** Crops grown in the Gaon: ids of settings.crops (CTO 17 Nov 2026). */
+    crops: { type: [String], default: undefined },
+    /** The name of an "other" crop (crops contains 'other'). */
+    cropsOther: { type: String },
     addedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     approvedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     approvedAt: { type: Date },

@@ -423,3 +423,20 @@ inactive zimmedar), `issue=yes|no|<kind>`, `visited=yes|no` (a submitted visit t
 District names, zimmedar, problems) and `counts` for the unit and name filters, so each filter shows
 how many it gives. `GET /dash/units-tree` gives the Suba / Division / District units in scope for the
 filters.
+
+## Gaon information: location, crops, local zimmedar (CTO 17 Nov 2026)
+
+- `villages.location` `{ lat, lng, accuracy?, source: gps|admin, by, at }`, `villages.crops` (ids of
+  `settings.crops`), `villages.cropsOther` (name of an "other" crop), and the existing
+  `localZimmedar { name, mobile }`.
+- Crops: `settings.crops`, or the seed default list (`modules/settings/crops.ts`, the CTO's list)
+  while the live document has none. `GET /meta` returns `crops`.
+- `POST /villages` (zimmedar) takes an optional `location`: the phone's GPS when the Gaon is added.
+- `PATCH /villages/:id/info { localZimmedar?, crops?, cropsOther?, location? }`: the zimmedar of the
+  Gaon fills an **empty** field once (else `409 VILLAGE_INFO_SET` with the fields); the Admin fills,
+  changes and clears (`null`). Audit `VILLAGE_INFO`, the mobile masked.
+- `GET /villages/:id/donors` returns the Gaon's information; `GET /dash/villages` returns it per row
+  with the donor count, the filter `info=noLocation|noLocalZimmedar|noCrops` and those counts.
+- `GET /dash/villages/export.xlsx` (same filters, up to 5,000 Gaon): Suba / Division / District and
+  the information. The local zimmedar's mobile shows masked; the full number is the cell's `tel:`
+  link. A Google Maps link per located Gaon.

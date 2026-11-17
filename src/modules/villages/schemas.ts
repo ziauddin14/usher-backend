@@ -8,9 +8,47 @@ export const approveSchema = z.object({ name: z.string().trim().min(2).max(80).o
 export const mergeSchema = z.object({ intoId: z.string().regex(/^[a-f0-9]{24}$/i) });
 export const assignSchema = z.object({ userId: z.string().regex(/^[a-f0-9]{24}$/i) });
 
+/** A point on the map: the phone's GPS (accuracy in metres) or one the Admin marks. */
+export const locationSchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  accuracy: z.number().min(0).max(100_000).optional(),
+});
+
 export const addVillageSchema = z.object({
   name: z.string().trim().min(2, 'name is too short').max(80),
+  /** The phone's location when the zimmedar adds the Gaon (CTO 17 Nov 2026), if allowed. */
+  location: locationSchema.optional(),
 });
+
+/**
+ * PATCH /villages/:id/info (CTO 17 Nov 2026). The zimmedar of the Gaon fills an empty field once;
+ * the Admin fills and changes (null clears). Only the fields sent are touched.
+ */
+export const villageInfoSchema = z
+  .object({
+    localZimmedar: z
+      .object({
+        name: z.string().trim().max(100).nullable().optional(),
+        mobile: z.string().trim().max(20).nullable().optional(),
+      })
+      .optional(),
+    crops: z
+      .array(z.string().regex(/^[a-z0-9_]{1,40}$/))
+      .max(30)
+      .nullable()
+      .optional(),
+    /** The name of an "other" crop; sent with crops. */
+    cropsOther: z.string().trim().max(80).optional(),
+    location: locationSchema.nullable().optional(),
+  })
+  .refine(
+    (v) => v.localZimmedar !== undefined || v.crops !== undefined || v.location !== undefined,
+    {
+      message: 'nothing to change',
+    },
+  );
+export type VillageInfoInput = z.infer<typeof villageInfoSchema>;
 
 const objectId = z.string().regex(/^[a-f0-9]{24}$/i);
 const villageName = z.string().trim().min(2, 'name is too short').max(80);

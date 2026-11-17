@@ -68,6 +68,20 @@ const settingSchema = new Schema(
     donorTasks: { type: [donorTaskSchema], default: undefined },
     /** The day's other work (same shape); absent → the seed default list. */
     otherWork: { type: [donorTaskSchema], default: undefined },
+    /** Crops of a Gaon (CTO 17 Nov 2026); absent → the seed default list (empty until given). */
+    crops: {
+      type: [
+        new Schema(
+          {
+            id: { type: String, required: true },
+            ...labelled,
+            order: { type: Number, required: true },
+          },
+          { _id: false },
+        ),
+      ],
+      default: undefined,
+    },
   },
   { timestamps: true },
 );

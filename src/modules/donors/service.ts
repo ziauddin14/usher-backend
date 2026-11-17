@@ -10,6 +10,7 @@ import { karachiDate } from '../../lib/time.js';
 import { Donor, type DonorDoc } from '../../models/donor.js';
 import type { JadwalDoc } from '../../models/jadwal.js';
 import { Village } from '../../models/village.js';
+import { infoOf } from '../villages/info.js';
 import { findUsableVillage } from '../villages/service.js';
 import { openPledgesOf, recordDonorWusooli, recordPledges } from './pledges.js';
 
@@ -31,7 +32,9 @@ export async function villageDonors(user: AuthUser, villageId: string, date?: st
   await connectDb();
   const usable = await findUsableVillage(user, villageId);
   if (!usable) throw new AppError(404, 'NOT_FOUND', 'Village not found');
-  const village = await Village.findById(usable._id).select('name localZimmedar').lean();
+  const village = await Village.findById(usable._id)
+    .select('name localZimmedar crops cropsOther location')
+    .lean();
   const [donors, pledges] = await Promise.all([
     Donor.find(oldOn(usable._id, date ?? karachiDate()))
       .select('name mobile acres source.kind meetings lastMet lastWusooli')
@@ -43,13 +46,8 @@ export async function villageDonors(user: AuthUser, villageId: string, date?: st
     village: {
       id: String(usable._id),
       name: village!.name,
-      localZimmedar:
-        village!.localZimmedar?.name || village!.localZimmedar?.mobile
-          ? {
-              name: village!.localZimmedar.name ?? null,
-              mobile: village!.localZimmedar.mobile ?? null,
-            }
-          : null,
+      // Local zimmedar, crops and location (CTO 17 Nov 2026); an empty one he may fill once.
+      ...infoOf(village!),
     },
     donors: donors.map((d) => ({
       id: String(d._id),

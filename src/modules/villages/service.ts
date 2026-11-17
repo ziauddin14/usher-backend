@@ -103,7 +103,11 @@ export async function listVillages(user: AuthUser, q?: string): Promise<VillageI
  * Step 4) and usable by them right away. Same normalized name in the district → 409 VILLAGE_EXISTS
  * with the existing village and whether it is already theirs (`mine`).
  */
-export async function addVillage(user: AuthUser, name: string): Promise<VillageItem> {
+export async function addVillage(
+  user: AuthUser,
+  name: string,
+  location?: { lat: number; lng: number; accuracy?: number | undefined },
+): Promise<VillageItem> {
   await connectDb();
   const districtPath = districtPathOf(user.unitPath);
   const districtCode = districtCodeOf(user.unitPath);
@@ -139,6 +143,19 @@ export async function addVillage(user: AuthUser, name: string): Promise<VillageI
     // The adder is responsible for it until the District says otherwise.
     assignedTo: new Types.ObjectId(user.id),
     source: { kind: 'zimmedar', at: new Date() },
+    // The phone's location when the Gaon is added (CTO 17 Nov 2026), when the zimmedar allowed it.
+    ...(location
+      ? {
+          location: {
+            lat: location.lat,
+            lng: location.lng,
+            ...(location.accuracy !== undefined ? { accuracy: Math.round(location.accuracy) } : {}),
+            source: 'gps',
+            by: new Types.ObjectId(user.id),
+            at: new Date(),
+          },
+        }
+      : {}),
   });
   await audit({
     action: 'VILLAGE_ADD',
@@ -147,7 +164,7 @@ export async function addVillage(user: AuthUser, name: string): Promise<VillageI
     targetType: 'village',
     targetId: String(village._id),
     unitPath: districtPath,
-    details: { name: village.name },
+    details: { name: village.name, ...(location ? { location: true } : {}) },
   });
   return {
     id: String(village._id),

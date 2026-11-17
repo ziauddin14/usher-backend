@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../../lib/auth.js';
-import { getDonorTasks, getOtherWork, getSettings } from '../../lib/settings.js';
+import { getCrops, getDonorTasks, getOtherWork, getSettings } from '../../lib/settings.js';
 import { karachiDate } from '../../lib/time.js';
 
 export function metaRouter(): Router {
@@ -19,6 +19,7 @@ export function metaRouter(): Router {
       targets: s.targets,
       donorTasks: await getDonorTasks(),
       otherWork: await getOtherWork(),
+      crops: await getCrops(),
     });
   });
 

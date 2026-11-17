@@ -11,6 +11,7 @@ import {
   villageBrowseQuery,
 } from './schemas.js';
 import { browseVillages, unitsTree } from './villages.js';
+import { villagesExport } from './villages-export.js';
 import { unitErp, userErp } from '../erp/service.js';
 import {
   childrenTable,
@@ -89,6 +90,19 @@ export function dashRouter(): Router {
   /** Every Gaon in scope with filters (CTO 17 Nov 2026). */
   router.get('/villages', async (req, res) => {
     res.json(await browseVillages(currentUser(req), parse(villageBrowseQuery, req.query)));
+  });
+
+  /** The Gaon list as Excel, with the same filters (CTO 17 Nov 2026). */
+  router.get('/villages/export.xlsx', async (req, res) => {
+    const { file, name } = await villagesExport(
+      currentUser(req),
+      parse(villageBrowseQuery, req.query),
+    );
+    res
+      .set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .set('Content-Disposition', `attachment; filename="${name}"`)
+      .set('Cache-Control', 'no-store')
+      .send(file);
   });
 
   /** Suba, Division and District units in scope, for the filters. */
