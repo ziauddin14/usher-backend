@@ -65,6 +65,8 @@ export const villageBrowseQuery = z.object({
     ])
     .optional(),
   visited: z.enum(['yes', 'no']).optional(),
+  /** Missing information (CTO 17 Nov 2026). */
+  info: z.enum(['noLocation', 'noLocalZimmedar', 'noCrops']).optional(),
   status: z.enum(['approved', 'pending']).optional(),
   q: z.string().trim().max(60).optional(),
   page: z.coerce.number().int().min(1).max(1000).default(1),

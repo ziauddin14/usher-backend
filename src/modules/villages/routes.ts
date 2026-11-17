@@ -22,7 +22,9 @@ import {
   mergeSchema,
   resolveIssueSchema,
   villageIdParams,
+  villageInfoSchema,
 } from './schemas.js';
+import { updateVillageInfo } from './info.js';
 import { addVillage, listVillages } from './service.js';
 import { villageDonors } from '../donors/service.js';
 import { donorsQuery } from './schemas.js';
@@ -39,8 +41,15 @@ export function villagesRouter(): Router {
   });
 
   router.post('/', requireRole('zimmedar'), async (req, res) => {
-    const { name } = parse(addVillageSchema, req.body);
-    res.status(201).json({ village: await addVillage(currentUser(req), name) });
+    const { name, location } = parse(addVillageSchema, req.body);
+    res.status(201).json({ village: await addVillage(currentUser(req), name, location) });
+  });
+
+  /** The Gaon's location, crops and local zimmedar (CTO 17 Nov 2026): see info.ts. */
+  router.patch('/:id/info', requireRole('zimmedar', ...EDITOR_ROLES), async (req, res) => {
+    const { id } = parse(villageIdParams, req.params);
+    const input = parse(villageInfoSchema, req.body);
+    res.json({ info: await updateVillageInfo(currentUser(req), id, input) });
   });
 
   const admin = requireRole(...EDITOR_ROLES);

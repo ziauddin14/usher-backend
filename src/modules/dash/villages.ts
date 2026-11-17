@@ -2,14 +2,19 @@ import type { Types } from 'mongoose';
 import type { AuthUser } from '../../lib/auth.js';
 import { connectDb } from '../../lib/db.js';
 import { assertInScope, escapeRegex, scopeFilter } from '../../lib/scope.js';
+import { getCrops } from '../../lib/settings.js';
 import { karachiDate } from '../../lib/time.js';
+import { Donor } from '../../models/donor.js';
 import { Jadwal } from '../../models/jadwal.js';
 import { Unit } from '../../models/unit.js';
 import { User } from '../../models/user.js';
 import { Village } from '../../models/village.js';
+import { infoOf } from '../villages/info.js';
 import type { VillageBrowseQuery } from './schemas.js';
 
 export const VILLAGE_PAGE_SIZE = 50;
+/** The Excel of the Gaon list holds every filtered Gaon, up to this many. */
+export const VILLAGE_EXPORT_MAX = 5000;
 
 const prefix = (path: string) => ({ $regex: `^${escapeRegex(path)}(/|$)` });
 
@@ -37,7 +42,11 @@ export async function unitsTree(caller: AuthUser) {
  * on all Gaon, not on one District), with filters and counts. Counts follow the unit and name
  * filters only, so each filter chip shows how many it would give.
  */
-export async function browseVillages(caller: AuthUser, q: VillageBrowseQuery) {
+export async function browseVillages(
+  caller: AuthUser,
+  q: VillageBrowseQuery,
+  opts: { all?: boolean } = {},
+) {
   await connectDb();
   const and: Record<string, unknown>[] = [
     scopeFilter(caller),
@@ -77,6 +86,13 @@ export async function browseVillages(caller: AuthUser, q: VillageBrowseQuery) {
   else if (q.issue) filters.push({ 'issues.kind': q.issue });
   if (q.visited === 'yes') filters.push({ _id: { $in: visitedIds } });
   if (q.visited === 'no') filters.push({ _id: { $nin: visitedIds } });
+  // Missing information (CTO 17 Nov 2026).
+  if (q.info === 'noLocation') filters.push({ location: null });
+  if (q.info === 'noLocalZimmedar') {
+    filters.push({ 'localZimmedar.name': { $in: [null, ''] } });
+    filters.push({ 'localZimmedar.mobile': { $in: [null, ''] } });
+  }
+  if (q.info === 'noCrops') filters.push({ 'crops.0': { $exists: false } });
   const filter = filters.length ? { $and: [...and, ...filters] } : base;
 
   const [countRows, total, rows] = await Promise.all([
@@ -93,15 +109,35 @@ export async function browseVillages(caller: AuthUser, q: VillageBrowseQuery) {
           },
           visited: { $sum: { $cond: [{ $in: ['$_id', visitedIds] }, 1, 0] } },
           pending: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } },
+          located: { $sum: { $cond: [{ $ifNull: ['$location', false] }, 1, 0] } },
+          withLocal: {
+            $sum: {
+              $cond: [
+                {
+                  $or: [
+                    { $gt: [{ $strLenCP: { $ifNull: ['$localZimmedar.name', ''] } }, 0] },
+                    { $gt: [{ $strLenCP: { $ifNull: ['$localZimmedar.mobile', ''] } }, 0] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+          withCrops: {
+            $sum: { $cond: [{ $gt: [{ $size: { $ifNull: ['$crops', []] } }, 0] }, 1, 0] },
+          },
         },
       },
     ]),
     Village.countDocuments(filter),
     Village.find(filter)
-      .select('name status unitPath districtCode assignedTo issues')
+      .select(
+        'name status unitPath districtCode assignedTo issues localZimmedar crops cropsOther location',
+      )
       .sort({ unitPath: 1, nameKey: 1 })
-      .skip((q.page - 1) * VILLAGE_PAGE_SIZE)
-      .limit(VILLAGE_PAGE_SIZE)
+      .skip(opts.all ? 0 : (q.page - 1) * VILLAGE_PAGE_SIZE)
+      .limit(opts.all ? VILLAGE_EXPORT_MAX : VILLAGE_PAGE_SIZE)
       .lean(),
   ]);
   const c = countRows[0] ?? {};
@@ -116,13 +152,24 @@ export async function browseVillages(caller: AuthUser, q: VillageBrowseQuery) {
     visited: n('visited'),
     notVisited: n('all') - n('visited'),
     pending: n('pending'),
+    noLocation: n('all') - n('located'),
+    noLocalZimmedar: n('all') - n('withLocal'),
+    noCrops: n('all') - n('withCrops'),
   };
 
-  const people = await User.find({
-    _id: { $in: rows.map((r) => r.assignedTo).filter(Boolean) },
-  })
-    .select('ajeerCode name nameUr')
-    .lean();
+  const [people, donorCounts, cropDefs] = await Promise.all([
+    User.find({ _id: { $in: rows.map((r) => r.assignedTo).filter(Boolean) } })
+      .select('ajeerCode name nameUr')
+      .lean(),
+    // The Gaon's people: its donors (CTO 17 Nov 2026).
+    Donor.aggregate<{ _id: Types.ObjectId; n: number }>([
+      { $match: { villageId: { $in: rows.map((r) => r._id) }, isActive: true } },
+      { $group: { _id: '$villageId', n: { $sum: 1 } } },
+    ]),
+    getCrops(),
+  ]);
+  const donorsOf = new Map(donorCounts.map((d) => [String(d._id), d.n]));
+  const cropOf = new Map(cropDefs.map((c) => [c.id, c]));
   const personOf = new Map(people.map((p) => [String(p._id), p]));
   const unitOf = new Map(units.map((u) => [u.code, u]));
   const named = (code: string | undefined) => {
@@ -159,6 +206,19 @@ export async function browseVillages(caller: AuthUser, q: VillageBrowseQuery) {
           detail: i.detail ?? null,
           suggestionName: i.suggestionName ?? null,
         })),
+        // Location, crops and local zimmedar (CTO 17 Nov 2026), with the crops' labels.
+        ...(() => {
+          const info = infoOf(v);
+          return {
+            ...info,
+            crops: info.crops.map((id) => ({
+              id,
+              labelUr: cropOf.get(id)?.labelUr ?? id,
+              labelRoman: cropOf.get(id)?.labelRoman ?? id,
+            })),
+          };
+        })(),
+        donors: donorsOf.get(String(v._id)) ?? 0,
       };
     }),
   };
