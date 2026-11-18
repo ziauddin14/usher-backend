@@ -440,3 +440,10 @@ filters.
 - `GET /dash/villages/export.xlsx` (same filters, up to 5,000 Gaon): Suba / Division / District and
   the information. The local zimmedar's mobile shows masked; the full number is the cell's `tel:`
   link. A Google Maps link per located Gaon.
+
+## App feedback from Usher management (18 Nov 2026)
+
+- Ijtima types: `kisan` is now "کسان / زمیندار اجتماع" (kisan in Punjab and zamindar in Sindh are
+  one thing) and `tarbiyati_halqa` ("تربیتی حلقہ") is new. A saved `zamindar` is read as `kisan`.
+- Other work of the day: "عشر / جنس منتقلی" (`ushr_jins_muntaqili`) and "عشر / جنس فروخت"
+  (`ushr_jins_farokht`) replace the four separate ushr / jins items (no live day used them).

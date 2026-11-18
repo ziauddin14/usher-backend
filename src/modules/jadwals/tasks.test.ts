@@ -58,10 +58,8 @@ describe('meeting tasks', () => {
     expect(tasks.find((t) => t.id === 'janwar')!.parts).toHaveLength(3);
     // The day's other work is its own list (CTO 12 Nov 2026).
     expect((res.body.otherWork as { id: string }[]).map((t) => t.id)).toEqual([
-      'ushr_muntaqili',
-      'jins_muntaqili',
-      'ushr_farokht',
-      'jins_farokht',
+      'ushr_jins_muntaqili',
+      'ushr_jins_farokht',
       'sharai_heela',
       'janwar',
     ]);
@@ -142,12 +140,12 @@ describe('meeting tasks', () => {
 
     const done = await post(`/jadwals/${id}/submit`, {
       meterEnd: 1010,
-      otherTasks: [{ id: 'janwar', parts: ['farokht'] }, { id: 'ushr_farokht' }],
+      otherTasks: [{ id: 'janwar', parts: ['farokht'] }, { id: 'ushr_jins_farokht' }],
     }).expect(200);
     expect(done.body.jadwal).toMatchObject({
       status: 'submitted',
       visits: [],
-      otherTasks: [{ id: 'ushr_farokht' }, { id: 'janwar', parts: ['farokht'] }],
+      otherTasks: [{ id: 'ushr_jins_farokht' }, { id: 'janwar', parts: ['farokht'] }],
       totals: { villages: 0, km: 10 },
     });
   });
@@ -163,11 +161,11 @@ describe('meeting tasks', () => {
     await post(`/jadwals/${both}/visits`, { villageId }).expect(201);
     const mixed = await post(`/jadwals/${both}/submit`, {
       meterEnd: 1005,
-      otherTasks: [{ id: 'jins_muntaqili' }, { id: 'ushr_muntaqili' }],
+      otherTasks: [{ id: 'sharai_heela' }, { id: 'ushr_jins_muntaqili' }],
     }).expect(200);
     expect(mixed.body.jadwal.otherTasks).toEqual([
-      { id: 'ushr_muntaqili' },
-      { id: 'jins_muntaqili' },
+      { id: 'ushr_jins_muntaqili' },
+      { id: 'sharai_heela' },
     ]);
     expect(mixed.body.jadwal.totals.villages).toBe(1);
   });

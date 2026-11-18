@@ -75,10 +75,9 @@ export const DEFAULT_DONOR_TASKS: DonorTaskDef[] = [
  * of settings.otherWork, same shape as the meeting tasks.
  */
 export const DEFAULT_OTHER_WORK: DonorTaskDef[] = [
-  { id: 'ushr_muntaqili', labelUr: 'عشر منتقلی', labelRoman: 'Ushr muntaqili' },
-  { id: 'jins_muntaqili', labelUr: 'جنس منتقلی', labelRoman: 'Jins muntaqili' },
-  { id: 'ushr_farokht', labelUr: 'عشر فروخت', labelRoman: 'Ushr farokht' },
-  { id: 'jins_farokht', labelUr: 'جنس فروخت', labelRoman: 'Jins farokht' },
+  // Ushr and jins are the same thing here (Usher management, 18 Nov 2026): one item each.
+  { id: 'ushr_jins_muntaqili', labelUr: 'عشر / جنس منتقلی', labelRoman: 'Ushr / jins muntaqili' },
+  { id: 'ushr_jins_farokht', labelUr: 'عشر / جنس فروخت', labelRoman: 'Ushr / jins farokht' },
   { id: 'sharai_heela', labelUr: 'شرعی حیلہ', labelRoman: 'Sharai heela' },
   {
     id: 'janwar',
