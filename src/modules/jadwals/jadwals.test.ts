@@ -405,6 +405,15 @@ describe('village tasks', () => {
     expect(no.body.visit.mashwara).toEqual({ held: false });
     expect(no.body.savedSteps).toEqual(['ijtima', 'mashwara']);
   });
+
+  it('ijtima types: kisan / zamindar is one; tarbiyati halqa (Usher management 18 Nov 2026)', async () => {
+    const halqa = await put('ijtima', { held: true, type: 'tarbiyati_halqa', participants: 7 });
+    expect(halqa.status).toBe(200);
+    expect(halqa.body.visit.ijtima).toMatchObject({ type: 'tarbiyati_halqa', participants: 7 });
+    const old = await put('ijtima', { held: true, type: 'zamindar', participants: 9 }).expect(200);
+    expect(old.body.visit.ijtima.type).toBe('kisan');
+    await put('ijtima', { held: true, type: 'other', participants: 9 }).expect(400);
+  });
 });
 
 describe('submit, lock and reopen', () => {

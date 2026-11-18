@@ -153,7 +153,11 @@ function buildVisit(
     donors: { oldMet: between(r, 0, 6), newDonors },
     atiyat: { entries, ...(gsb ? { gsb } : {}) },
     ijtima: ijtima
-      ? { held: true, type: r() < 0.6 ? 'kisan' : 'zamindar', participants: between(r, 8, 30) }
+      ? {
+          held: true,
+          type: r() < 0.7 ? 'kisan' : 'tarbiyati_halqa',
+          participants: between(r, 8, 30),
+        }
       : { held: false },
     mashwara: mashwara ? { held: true, participants: between(r, 2, 8) } : { held: false },
     savedSteps: ['donors', 'atiyat', 'ijtima', 'mashwara'],

@@ -108,7 +108,9 @@ const visitSchema = new Schema({
     type: new Schema(
       {
         held: { type: Boolean, required: true },
-        type: { type: String, enum: ['kisan', 'zamindar'] },
+        // kisan = "کسان / زمیندار اجتماع" (one thing: kisan in Punjab, zamindar in Sindh) and the
+        // tarbiyati halqa (Usher management, 18 Nov 2026). 'zamindar' only on older days.
+        type: { type: String, enum: ['kisan', 'zamindar', 'tarbiyati_halqa'] },
         participants: count,
       },
       { _id: false },

@@ -64,7 +64,7 @@ describe('task counts in reports', () => {
     expect(m('gsb')).toMatchObject({ times: 0 });
     const o = (id: string) => (res.body.other as { id: string }[]).find((x) => x.id === id);
     expect(o('sharai_heela')).toMatchObject({ days: 1 });
-    expect(o('ushr_farokht')).toMatchObject({ days: 0 });
+    expect(o('ushr_jins_farokht')).toMatchObject({ days: 0 });
     expect(res.body).toMatchObject({ days: 1, from: today, to: today });
   });
 

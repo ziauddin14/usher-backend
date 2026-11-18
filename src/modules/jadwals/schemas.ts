@@ -165,7 +165,11 @@ export const atiyatSchema = z
 export const ijtimaSchema = z
   .object({
     held: z.boolean(),
-    type: z.enum(['kisan', 'zamindar']).optional(),
+    // 'zamindar' is read as 'kisan' (the same ijtima, Usher management 18 Nov 2026).
+    type: z
+      .enum(['kisan', 'zamindar', 'tarbiyati_halqa'])
+      .transform((t) => (t === 'zamindar' ? 'kisan' : t))
+      .optional(),
     participants: count.optional(),
   })
   .refine((b) => !b.held || (b.type && b.participants && b.participants >= 1), {
