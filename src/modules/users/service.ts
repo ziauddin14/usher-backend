@@ -23,7 +23,9 @@ function lowerRoles(caller: AuthUser): Role[] {
 
 /**
  * GET /users — users in the caller's subtree whose role is below the caller's. The optional
- * profile mobile is shown masked; it needs no verification (CTO 7 Nov 2026).
+ * profile mobile is shown masked; it needs no verification (CTO 7 Nov 2026). Each user carries the
+ * Suba, Division and District of their unit (Usher management, 26 Nov 2026: the list showed only
+ * the District code), sorted by Division, then District.
  */
 export async function listUsers(caller: AuthUser, opts: { unit?: string; q?: string }) {
   await connectDb();
@@ -47,11 +49,22 @@ export async function listUsers(caller: AuthUser, opts: { unit?: string; q?: str
 
   const users = await User.find(filter)
     .select(
-      'ajeerCode ajeerCodeFull name nameUr fatherName mobile role zimmedari unitCode isActive mustChangePassword lastLoginAt extraUnitPaths',
+      'ajeerCode ajeerCodeFull name nameUr fatherName mobile role zimmedari unitCode unitPath isActive mustChangePassword lastLoginAt extraUnitPaths',
     )
-    .sort({ unitCode: 1, ajeerCode: 1 })
+    .sort({ unitPath: 1, ajeerCode: 1 })
     .limit(500)
     .lean();
+
+  // PK/<suba>/<division>/<district>: the names of the units on the users' paths.
+  const codes = [...new Set(users.flatMap((u) => u.unitPath.split('/').slice(1, 4)))];
+  const units = await Unit.find({ code: { $in: codes } })
+    .select('code name nameUr')
+    .lean();
+  const unitOf = new Map(units.map((x) => [x.code, x]));
+  const named = (code: string | undefined) => {
+    const x = code ? unitOf.get(code) : undefined;
+    return x ? { code: x.code, name: x.name, nameUr: x.nameUr ?? null } : null;
+  };
 
   return users.map((u) => ({
     id: String(u._id),
@@ -64,6 +77,9 @@ export async function listUsers(caller: AuthUser, opts: { unit?: string; q?: str
     role: u.role,
     zimmedari: u.zimmedari,
     unitCode: u.unitCode,
+    suba: named(u.unitPath.split('/')[1]),
+    division: named(u.unitPath.split('/')[2]),
+    district: named(u.unitPath.split('/')[3]),
     isActive: u.isActive,
     mustChangePassword: u.mustChangePassword,
     lastLoginAt: u.lastLoginAt,
