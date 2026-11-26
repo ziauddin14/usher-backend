@@ -58,6 +58,33 @@ describe('GET /users (supervisor-only, scoped)', () => {
     expect(users.some((u) => u.role === 'division')).toBe(false);
   });
 
+  it('each user carries Suba, Division and District names (Usher management 26 Nov 2026)', async () => {
+    const cookie = await loginCookie(app, '9100001');
+    const res = await request(app).get('/api/v1/users').set('Cookie', cookie).expect(200);
+    type Named = { code: string; name: string } | null;
+    const users = res.body.users as (ListedUser & {
+      zimmedari?: string;
+      suba: Named;
+      division: Named;
+      district: Named;
+    })[];
+    const ghotki = users.find((u) => u.ajeerCode === '9090412')!;
+    expect(ghotki).toMatchObject({
+      role: 'zimmedar',
+      zimmedari: 'ushar',
+      suba: { code: 'INT_SINDH' },
+      division: { code: 'SUKKUR', name: 'Sukkur' },
+      district: { code: 'GHOTKI', name: 'Ghotki' },
+    });
+    // A Division zimmedar has a Division and no District.
+    const division = users.find((u) => u.ajeerCode === '9030001')!;
+    expect(division).toMatchObject({
+      role: 'division',
+      division: { code: 'SUKKUR' },
+      district: null,
+    });
+  });
+
   it('searches by name or ajeer code', async () => {
     const cookie = await loginCookie(app, '9010001');
     const res = await request(app).get('/api/v1/users?q=9090412').set('Cookie', cookie).expect(200);

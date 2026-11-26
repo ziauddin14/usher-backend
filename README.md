@@ -447,3 +447,10 @@ filters.
   one thing) and `tarbiyati_halqa` ("تربیتی حلقہ") is new. A saved `zamindar` is read as `kisan`.
 - Other work of the day: "عشر / جنس منتقلی" (`ushr_jins_muntaqili`) and "عشر / جنس فروخت"
   (`ushr_jins_farokht`) replace the four separate ushr / jins items (no live day used them).
+
+## Users list: Division, District and zimmedari (Usher management, 26 Nov 2026)
+
+`GET /users` returns `suba`, `division` and `district` (`{ code, name, nameUr }` or null) for each
+user, from the user's `unitPath`, and is sorted by unit path (Division, then District). The
+dashboard's Zimmedaran list shows the zimmedari (Ushar / Tehsil-Town / Event Zimmedar, or District /
+Division / Suba Zimmedar), the Division and the District.
