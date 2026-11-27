@@ -454,3 +454,9 @@ filters.
 user, from the user's `unitPath`, and is sorted by unit path (Division, then District). The
 dashboard's Zimmedaran list shows the zimmedari (Ushar / Tehsil-Town / Event Zimmedar, or District /
 Division / Suba Zimmedar), the Division and the District.
+
+## Start time of a back-dated day (Usher management, 27 Nov 2026)
+
+`POST /jadwals` takes an optional `startTime` ("HH:MM", Karachi time). For an earlier date of the
+back-date window, `startedAt` is that date and time (UTC+5, no daylight saving); today's day always
+starts now. The zimmedar app asks for the time whenever an earlier date is chosen.

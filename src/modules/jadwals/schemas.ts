@@ -21,6 +21,14 @@ export const createJadwalSchema = z
     entryType: z.enum(ENTRY_TYPES),
     travel: travelStart.optional(),
     note: z.string().trim().max(500).optional(),
+    /**
+     * "HH:MM" Karachi time the day started, written for an earlier date (Usher management, 27 Nov
+     * 2026); today's day always starts now.
+     */
+    startTime: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be HH:MM')
+      .optional(),
   })
   .refine((b) => b.entryType !== 'amli' || b.travel, {
     message: 'travel is required for an amli jadwal',

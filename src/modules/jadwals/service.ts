@@ -6,7 +6,7 @@ import { connectDb } from '../../lib/db.js';
 import { AppError } from '../../lib/errors.js';
 import { scopeFilter } from '../../lib/scope.js';
 import { getDonorTasks, getOtherWork, getSettings } from '../../lib/settings.js';
-import { addDays, isDateString, karachiDate, monthOf } from '../../lib/time.js';
+import { addDays, isDateString, karachiDate, monthOf, karachiInstant } from '../../lib/time.js';
 import { Jadwal, type JadwalDoc } from '../../models/jadwal.js';
 import { computeDayTotals } from '../reports/calc.js';
 import { findUsableVillage } from '../villages/service.js';
@@ -194,6 +194,9 @@ export async function createJadwal(
 
   const now = new Date();
   const isAmli = body.entryType === 'amli';
+  // A day of an earlier date starts at the time the zimmedar writes (Usher management, 27 Nov
+  // 2026); today's day starts now.
+  const startedAt = date < today && body.startTime ? karachiInstant(date, body.startTime) : now;
   try {
     const doc = await Jadwal.create({
       userId: userOid(user),
@@ -203,7 +206,7 @@ export async function createJadwal(
       month: monthOf(date),
       entryType: body.entryType,
       status: isAmli ? 'draft' : 'submitted',
-      startedAt: now,
+      startedAt,
       ...(isAmli ? { travel: body.travel } : { submittedAt: now }),
       ...(body.note ? { note: body.note } : {}),
       visits: [],

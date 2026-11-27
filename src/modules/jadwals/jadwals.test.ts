@@ -107,6 +107,32 @@ describe('starting a day', () => {
       .expect(400);
   });
 
+  it('an earlier date starts at the written time; today starts now (Usher management 27 Nov 2026)', async () => {
+    const back = await api(arif)
+      .post('/jadwals', {
+        entryType: 'amli',
+        date: addDays(today, -1),
+        startTime: '08:30',
+        travel: { mode: 'bike', meterStart: 500 },
+      })
+      .expect(201);
+    // 08:30 in Karachi is 03:30 UTC.
+    expect(back.body.jadwal.startedAt).toBe(`${addDays(today, -1)}T03:30:00.000Z`);
+
+    const now = Date.now();
+    const t = await api(arif)
+      .post('/jadwals', { entryType: 'rukhsat', startTime: '08:30' })
+      .expect(201);
+    expect(Math.abs(new Date(t.body.jadwal.startedAt as string).getTime() - now)).toBeLessThan(
+      60_000,
+    );
+
+    const bad = await api(arif)
+      .post('/jadwals', { entryType: 'rukhsat', date: addDays(today, -2), startTime: '25:00' })
+      .expect(400);
+    expect(bad.body.error.code).toBe('VALIDATION_FAILED');
+  });
+
   it('back-dated day next to today: listed on /today as an open draft, audited as back-dated', async () => {
     await startBikeDay(arif, 100); // today
     const back = await startBikeDay(arif, 50, addDays(today, -2));
