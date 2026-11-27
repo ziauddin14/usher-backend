@@ -33,6 +33,7 @@ export const KPI_KEYS = [
   'ijtimas',
   'mashwaras',
   'km',
+  'personalKm',
   'fare',
 ] as const satisfies readonly (keyof DayTotals)[];
 export type Kpis = Record<(typeof KPI_KEYS)[number], number>;

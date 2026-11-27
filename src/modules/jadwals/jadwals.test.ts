@@ -508,6 +508,36 @@ describe('submit, lock and reopen', () => {
     expect(await AuditLog.countDocuments({ action: 'JADWAL_SUBMIT', targetId: id })).toBe(1);
   });
 
+  it('personal travel km is left out of the day km (Usher management, 27 Nov 2026)', async () => {
+    const id = await fullDay();
+    // Meter 48214 → 48276 = 62 km; more personal km than that is refused.
+    const high = await api(arif)
+      .post(`/jadwals/${id}/submit`, { meterEnd: 48276, personalKm: 63 })
+      .expect(400);
+    expect(high.body.error.details.reason).toBe('PERSONAL_KM_TOO_HIGH');
+    const res = await api(arif)
+      .post(`/jadwals/${id}/submit`, {
+        meterEnd: 48276,
+        personalKm: 12,
+        personalNote: 'گھر کا کام',
+      })
+      .expect(200);
+    expect(res.body.jadwal).toMatchObject({
+      travel: { meterEnd: 48276, km: 50, personalKm: 12, personalNote: 'گھر کا کام' },
+      totals: { km: 50, personalKm: 12 },
+    });
+  });
+
+  it('no personal km sent → 0 and no note', async () => {
+    const id = await fullDay();
+    const res = await api(arif)
+      .post(`/jadwals/${id}/submit`, { meterEnd: 48276, personalKm: 0, personalNote: 'x' })
+      .expect(200);
+    expect(res.body.jadwal.travel).toMatchObject({ km: 62, personalKm: 0 });
+    expect(res.body.jadwal.travel.personalNote).toBeUndefined();
+    expect(res.body.jadwal.totals).toMatchObject({ km: 62, personalKm: 0 });
+  });
+
   it('no writes after submit → 409 JADWAL_LOCKED', async () => {
     const id = await fullDay();
     await api(arif).post(`/jadwals/${id}/submit`, { meterEnd: 48276 }).expect(200);

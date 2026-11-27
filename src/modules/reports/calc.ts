@@ -24,6 +24,7 @@ export interface JadwalInput {
     mode: 'bike' | 'bus';
     meterStart?: number | null;
     meterEnd?: number | null;
+    personalKm?: number | null;
     fare?: number | null;
   } | null;
   visits?: VisitInput[] | null;
@@ -47,7 +48,10 @@ export interface DayTotals {
   ijtimas: number;
   ijtimaParticipants: number;
   mashwaras: number;
+  /** Km of the jadwal: meter end − meter start − personal km. */
   km: number;
+  /** Km of personal travel the zimmedar wrote at the end of the day. */
+  personalKm: number;
   fare: number;
 }
 
@@ -97,6 +101,7 @@ export function computeDayTotals(jadwal: JadwalInput, categories: CategoryRule[]
     ijtimaParticipants: 0,
     mashwaras: 0,
     km: 0,
+    personalKm: 0,
     fare: 0,
   };
   for (const visit of jadwal.visits ?? []) {
@@ -123,7 +128,10 @@ export function computeDayTotals(jadwal: JadwalInput, categories: CategoryRule[]
     typeof travel.meterStart === 'number' &&
     typeof travel.meterEnd === 'number'
   ) {
-    totals.km = Math.max(0, travel.meterEnd - travel.meterStart);
+    const meterKm = Math.max(0, travel.meterEnd - travel.meterStart);
+    // Personal travel inside the reading is left out of the jadwal's km (Usher management, 27 Nov 2026).
+    totals.personalKm = Math.min(meterKm, n(travel.personalKm));
+    totals.km = meterKm - totals.personalKm;
   }
   if (travel?.mode === 'bus') totals.fare = n(travel.fare);
   return totals;

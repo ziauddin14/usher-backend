@@ -47,10 +47,18 @@ export async function correctJadwal(caller: AuthUser, id: string, body: Body) {
           reason: 'METER_END_BEFORE_START',
         });
       }
+      const personal = body.travel.personalKm ?? t.personalKm ?? 0;
+      if (personal > end - start) {
+        throw new AppError(400, 'VALIDATION_FAILED', 'Personal km cannot be more than the trip', {
+          reason: 'PERSONAL_KM_TOO_HIGH',
+        });
+      }
       doc.set('travel.meterStart', start);
       doc.set('travel.meterEnd', end);
-      doc.set('travel.km', end - start);
-      changes.push(`travel: meter ${start}–${end}`);
+      doc.set('travel.personalKm', personal);
+      if (personal === 0) doc.set('travel.personalNote', undefined);
+      doc.set('travel.km', end - start - personal);
+      changes.push(`travel: meter ${start}–${end}, personal ${personal} km`);
     } else if (body.travel.fare !== undefined) {
       doc.set('travel.fare', body.travel.fare);
       changes.push(`travel: fare ${body.travel.fare}`);

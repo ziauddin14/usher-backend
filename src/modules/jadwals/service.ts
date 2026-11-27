@@ -382,8 +382,16 @@ export async function submitJadwal(
         reason: 'METER_END_BEFORE_START',
       });
     }
+    const personal = body.personalKm ?? 0;
+    if (personal > body.meterEnd - start) {
+      throw new AppError(400, 'VALIDATION_FAILED', 'Personal km cannot be more than the trip', {
+        reason: 'PERSONAL_KM_TOO_HIGH',
+      });
+    }
     doc.set('travel.meterEnd', body.meterEnd);
-    doc.set('travel.km', body.meterEnd - start);
+    doc.set('travel.personalKm', personal);
+    doc.set('travel.personalNote', personal > 0 && body.personalNote ? body.personalNote : undefined);
+    doc.set('travel.km', body.meterEnd - start - personal);
   }
   if (doc.travel?.mode === 'bus') {
     // The fare is entered when the day ends (CTO 11 Nov 2026); a fare sent at the start (older

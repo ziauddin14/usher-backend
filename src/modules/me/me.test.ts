@@ -241,7 +241,7 @@ describe('zimmedar khulasa, reward and export (A11, A12)', () => {
     expect(ws.views[0]).toMatchObject({ rightToLeft: true });
     const header = ws.getRow(2);
     expect(header.getCell(1).text).toBe('تاریخ');
-    expect(header.cellCount).toBe(14);
+    expect(header.cellCount).toBe(15);
     expect(ws.rowCount).toBe(2 + 31 + 1);
     const totals = ws.getRow(ws.rowCount);
     expect(totals.getCell(1).text).toBe('کل');
