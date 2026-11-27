@@ -105,8 +105,17 @@ describe('computeDayTotals', () => {
       ijtimaParticipants: 18,
       mashwaras: 1,
       km: 62,
+      personalKm: 0,
       fare: 0,
     });
+  });
+
+  it('leaves personal km out of the bike km (Usher management, 27 Nov 2026)', () => {
+    const t = computeDayTotals(
+      { travel: { mode: 'bike', meterStart: 100, meterEnd: 160, personalKm: 15 }, visits: [] },
+      categories,
+    );
+    expect(t).toMatchObject({ km: 45, personalKm: 15 });
   });
 
   it('uses the fare for bus days and zeros for a day without visits', () => {

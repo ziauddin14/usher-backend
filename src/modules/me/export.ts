@@ -27,6 +27,7 @@ const COLUMNS: { header: string; key: keyof Kpis | 'date' | 'entryType'; width: 
   { header: 'اجتماع', key: 'ijtimas', width: 9 },
   { header: 'مشورہ', key: 'mashwaras', width: 9 },
   { header: 'کلومیٹر', key: 'km', width: 10 },
+  { header: 'ذاتی کلومیٹر', key: 'personalKm', width: 12 },
   { header: 'کرایہ', key: 'fare', width: 10 },
 ];
 

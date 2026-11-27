@@ -21,6 +21,14 @@ export const createJadwalSchema = z
     entryType: z.enum(ENTRY_TYPES),
     travel: travelStart.optional(),
     note: z.string().trim().max(500).optional(),
+    /**
+     * "HH:MM" Karachi time the day started, written for an earlier date (Usher management, 27 Nov
+     * 2026); today's day always starts now.
+     */
+    startTime: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be HH:MM')
+      .optional(),
   })
   .refine((b) => b.entryType !== 'amli' || b.travel, {
     message: 'travel is required for an amli jadwal',
@@ -190,6 +198,12 @@ export const mashwaraSchema = z
 
 export const submitSchema = z.object({
   meterEnd: count.max(10_000_000).optional(),
+  /**
+   * Bike days: km of personal travel inside the meter reading (a personal errand on the way); it is
+   * left out of the day's km (Usher management, 27 Nov 2026). Not sent = 0.
+   */
+  personalKm: count.max(10_000_000).optional(),
+  personalNote: z.string().trim().max(200).optional(),
   /** Bus days: the day's fare, entered on the End screen (CTO 11 Nov 2026). */
   fare: rupees.optional(),
   /** The day's other work (settings.otherWork); needed when the day has no Gaon (CTO 12 Nov 2026). */
@@ -217,6 +231,7 @@ export const correctSchema = z.object({
     .object({
       meterStart: z.number().int().min(0).max(10_000_000).optional(),
       meterEnd: z.number().int().min(0).max(10_000_000).optional(),
+      personalKm: z.number().int().min(0).max(10_000_000).optional(),
       fare: correctMoney.optional(),
     })
     .optional(),

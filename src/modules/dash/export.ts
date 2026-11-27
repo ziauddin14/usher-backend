@@ -99,6 +99,7 @@ export async function dashExport(
         'Wusooli (kul)',
         'Reward wali',
         'KM',
+        'Zaati KM',
         'Kiraya',
       ],
       d.days.map((x) => {
@@ -120,6 +121,7 @@ export async function dashExport(
           t.wusooli ?? null,
           t.rewardWusooli ?? null,
           t.km ?? null,
+          t.personalKm ?? null,
           t.fare ?? null,
         ];
       }),
@@ -135,6 +137,7 @@ export async function dashExport(
         kpi('wusooli'),
         kpi('rewardWusooli'),
         kpi('km'),
+        kpi('personalKm'),
         kpi('fare'),
       ],
       undefined,

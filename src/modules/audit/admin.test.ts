@@ -239,6 +239,21 @@ describe('Admin: correcting a submitted jadwal', () => {
       })
       .expect(404);
   });
+
+
+  it('the Admin corrects the personal km too; never more than the trip (27 Nov 2026)', async () => {
+    const over = await api(admin2)
+      .post(`/jadwals/${id}/correct`, { reason: 'Zaati safar', travel: { personalKm: 41 } })
+      .expect(400);
+    expect(over.body.error.details.reason).toBe('PERSONAL_KM_TOO_HIGH');
+    const personal = await api(admin2)
+      .post(`/jadwals/${id}/correct`, { reason: 'Zaati safar', travel: { personalKm: 15 } })
+      .expect(200);
+    expect(personal.body.jadwal).toMatchObject({
+      travel: { meterStart: 1000, meterEnd: 1040, personalKm: 15, km: 25 },
+      totals: { km: 25, personalKm: 15 },
+    });
+  });
 });
 
 describe('the audit log', () => {

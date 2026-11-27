@@ -454,3 +454,20 @@ filters.
 user, from the user's `unitPath`, and is sorted by unit path (Division, then District). The
 dashboard's Zimmedaran list shows the zimmedari (Ushar / Tehsil-Town / Event Zimmedar, or District /
 Division / Suba Zimmedar), the Division and the District.
+
+## Start time of a back-dated day (Usher management, 27 Nov 2026)
+
+`POST /jadwals` takes an optional `startTime` ("HH:MM", Karachi time). For an earlier date of the
+back-date window, `startedAt` is that date and time (UTC+5, no daylight saving); today's day always
+starts now. The zimmedar app asks for the time whenever an earlier date is chosen.
+
+## Personal travel on a bike day (Usher management, 27 Nov 2026)
+
+A zimmedar sometimes rides to a personal errand during the jadwal. `POST /jadwals/:id/submit`
+takes an optional `personalKm` (integer, not sent = 0) and `personalNote` (≤ 200 chars, kept only
+when `personalKm` > 0). The day's `travel.km` and `totals.km` = meter end − meter start −
+`personalKm`; `totals.personalKm` keeps the personal km. More personal km than the meter trip →
+400 `PERSONAL_KM_TOO_HIGH`. A stop (break) without riding moves no meter, so nothing is written for
+it. The Admin's correction (`POST /jadwals/:id/correct`) takes `travel.personalKm` too. The zimmedar
+app asks "was there personal travel today? yes / no" on the End screen of every bike day; the
+dashboard day view and both Excel files show the personal km.

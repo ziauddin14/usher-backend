@@ -144,6 +144,7 @@ const totalsSchema = new Schema(
     ijtimaParticipants: count,
     mashwaras: count,
     km: count,
+    personalKm: count,
     fare: money,
   },
   { _id: false },
@@ -167,6 +168,9 @@ const jadwalSchema = new Schema(
           meterStart: count,
           meterEnd: count,
           km: count,
+          /** Km of personal travel inside the meter reading, left out of km (Usher management, 27 Nov 2026). */
+          personalKm: count,
+          personalNote: { type: String, maxlength: 200 },
           fare: money,
         },
         { _id: false },

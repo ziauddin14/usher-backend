@@ -16,6 +16,11 @@ export function karachiDate(at: Date = new Date()): string {
   return karachiFormat.format(at);
 }
 
+/** The instant of a Karachi local date and "HH:MM" (Pakistan has no daylight saving: UTC+5). */
+export function karachiInstant(date: string, time: string): Date {
+  return new Date(`${date}T${time}:00+05:00`);
+}
+
 /** Karachi local month (YYYY-MM) of an instant. */
 export function karachiMonth(at: Date = new Date()): string {
   return karachiDate(at).slice(0, 7);

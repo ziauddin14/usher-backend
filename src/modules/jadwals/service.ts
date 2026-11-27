@@ -6,7 +6,7 @@ import { connectDb } from '../../lib/db.js';
 import { AppError } from '../../lib/errors.js';
 import { scopeFilter } from '../../lib/scope.js';
 import { getDonorTasks, getOtherWork, getSettings } from '../../lib/settings.js';
-import { addDays, isDateString, karachiDate, monthOf } from '../../lib/time.js';
+import { addDays, isDateString, karachiDate, monthOf, karachiInstant } from '../../lib/time.js';
 import { Jadwal, type JadwalDoc } from '../../models/jadwal.js';
 import { computeDayTotals } from '../reports/calc.js';
 import { findUsableVillage } from '../villages/service.js';
@@ -194,6 +194,9 @@ export async function createJadwal(
 
   const now = new Date();
   const isAmli = body.entryType === 'amli';
+  // A day of an earlier date starts at the time the zimmedar writes (Usher management, 27 Nov
+  // 2026); today's day starts now.
+  const startedAt = date < today && body.startTime ? karachiInstant(date, body.startTime) : now;
   try {
     const doc = await Jadwal.create({
       userId: userOid(user),
@@ -203,7 +206,7 @@ export async function createJadwal(
       month: monthOf(date),
       entryType: body.entryType,
       status: isAmli ? 'draft' : 'submitted',
-      startedAt: now,
+      startedAt,
       ...(isAmli ? { travel: body.travel } : { submittedAt: now }),
       ...(body.note ? { note: body.note } : {}),
       visits: [],
@@ -379,8 +382,16 @@ export async function submitJadwal(
         reason: 'METER_END_BEFORE_START',
       });
     }
+    const personal = body.personalKm ?? 0;
+    if (personal > body.meterEnd - start) {
+      throw new AppError(400, 'VALIDATION_FAILED', 'Personal km cannot be more than the trip', {
+        reason: 'PERSONAL_KM_TOO_HIGH',
+      });
+    }
     doc.set('travel.meterEnd', body.meterEnd);
-    doc.set('travel.km', body.meterEnd - start);
+    doc.set('travel.personalKm', personal);
+    doc.set('travel.personalNote', personal > 0 && body.personalNote ? body.personalNote : undefined);
+    doc.set('travel.km', body.meterEnd - start - personal);
   }
   if (doc.travel?.mode === 'bus') {
     // The fare is entered when the day ends (CTO 11 Nov 2026); a fare sent at the start (older
