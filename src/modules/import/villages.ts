@@ -391,7 +391,10 @@ export async function importVillages(
     .select('_id name unitPath nameKey status mergedInto assignedTo formerNames')
     .lean();
   const liveById = new Map(
-    existing.filter((v) => v.status !== 'merged').map((v) => [String(v._id), v]),
+    // A rejected Gaon (added by mistake) is never matched: the official list makes its own record.
+    existing
+      .filter((v) => v.status !== 'merged' && v.status !== 'rejected')
+      .map((v) => [String(v._id), v]),
   );
   const byKey = new Map<string, (typeof existing)[number]>();
   for (const v of liveById.values()) byKey.set(`${v.unitPath}|${v.nameKey}`, v);

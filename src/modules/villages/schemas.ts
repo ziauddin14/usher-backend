@@ -6,6 +6,8 @@ export const listVillagesQuery = z.object({ q: z.string().trim().max(60).optiona
 export const villageIdParams = z.object({ id: z.string().regex(/^[a-f0-9]{24}$/i) });
 export const approveSchema = z.object({ name: z.string().trim().min(2).max(80).optional() });
 export const mergeSchema = z.object({ intoId: z.string().regex(/^[a-f0-9]{24}$/i) });
+/** POST /villages/:id/reject — why a new Gaon is refused (CTO 28 Nov 2026). */
+export const rejectSchema = z.object({ reason: z.string().trim().min(5).max(300) });
 export const assignSchema = z.object({ userId: z.string().regex(/^[a-f0-9]{24}$/i) });
 
 /** A point on the map: the phone's GPS (accuracy in metres) or one the Admin marks. */

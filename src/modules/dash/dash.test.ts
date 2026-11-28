@@ -361,6 +361,52 @@ describe('dashboards (B1 / B2)', () => {
     expect(await AuditLog.countDocuments({ action: 'VILLAGE_MERGE' })).toBe(1);
   });
 
+  it('villages: a new Gaon added by mistake is rejected with a reason, never deleted (CTO 28 Nov 2026)', async () => {
+    const me = await User.findOne({ ajeerCode: '9090412' }).lean();
+    const wrong = await Village.create({
+      name: 'غلط گاؤں',
+      nameKey: 'غلط گاؤں',
+      districtCode: me!.unitCode,
+      unitPath: me!.unitPath,
+      status: 'pending',
+      addedBy: me!._id,
+      assignedTo: me!._id,
+    });
+    const url = `/villages/${String(wrong._id)}/reject`;
+    await post(url, district, { reason: 'Ghalti se bana' }).expect(403);
+    await post(url, zimmedar, { reason: 'Ghalti se bana' }).expect(403);
+    await post(url, admin, { reason: 'abc' }).expect(400);
+
+    // In a jadwal (any status): merge it into the right Gaon instead.
+    const day = await Jadwal.findOne({ userId: me!._id });
+    day!.visits.push({ villageId: wrong._id, villageName: wrong.name, savedSteps: [] });
+    await day!.save();
+    const used = await post(url, admin, { reason: 'Ghalti se bana' }).expect(409);
+    expect(used.body.error.details.reason).toBe('VILLAGE_HAS_VISITS');
+    day!.visits.pull({ villageId: wrong._id });
+    await day!.save();
+
+    const ok = await post(url, admin, { reason: 'Ghalti se bana' }).expect(200);
+    expect(ok.body.village).toMatchObject({ status: 'rejected' });
+    expect(await Village.findById(wrong._id).lean()).toMatchObject({
+      status: 'rejected',
+      rejectReason: 'Ghalti se bana',
+    });
+    const log = await AuditLog.findOne({
+      action: 'VILLAGE_REJECT',
+      targetId: String(wrong._id),
+    }).lean();
+    expect(log).toMatchObject({ actorAjeerCode: '9100001', details: { reason: 'Ghalti se bana' } });
+    // Gone from the pending list and the zimmedar's list; a second reject is refused.
+    const pending = (await get('/villages/pending', admin).expect(200)).body.villages as {
+      id: string;
+    }[];
+    expect(pending.map((x) => x.id)).not.toContain(String(wrong._id));
+    const mine = (await get('/villages', zimmedar).expect(200)).body.villages as { id: string }[];
+    expect(mine.map((x) => x.id)).not.toContain(String(wrong._id));
+    await post(url, admin, { reason: 'Ghalti se bana' }).expect(409);
+  });
+
   it('users: deactivate ends the sessions at once (audited); reactivate', async () => {
     const z = await User.findOne({
       role: 'zimmedar',

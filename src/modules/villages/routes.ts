@@ -8,6 +8,7 @@ import {
   listDuplicates,
   listPending,
   mergeVillage,
+  rejectVillage,
   resolveIssue,
   updateVillage,
 } from './manage.js';
@@ -20,6 +21,7 @@ import {
   updateVillageSchema,
   listVillagesQuery,
   mergeSchema,
+  rejectSchema,
   resolveIssueSchema,
   villageIdParams,
   villageInfoSchema,
@@ -86,6 +88,12 @@ export function villagesRouter(): Router {
     const { id } = parse(villageIdParams, req.params);
     const { name } = parse(approveSchema, req.body ?? {});
     res.json({ village: await approveVillage(currentUser(req), id, name) });
+  });
+
+  router.post('/:id/reject', admin, async (req, res) => {
+    const { id } = parse(villageIdParams, req.params);
+    const { reason } = parse(rejectSchema, req.body);
+    res.json({ village: await rejectVillage(currentUser(req), id, reason) });
   });
 
   router.post('/:id/merge', admin, async (req, res) => {
