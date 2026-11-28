@@ -1,6 +1,7 @@
 import mongoose, { type InferSchemaType, type Model, Schema } from 'mongoose';
 
-export const VILLAGE_STATUS = ['approved', 'pending', 'merged'] as const;
+/** rejected: a new Gaon added by mistake, refused by the Admin (CTO 28 Nov 2026); never deleted. */
+export const VILLAGE_STATUS = ['approved', 'pending', 'merged', 'rejected'] as const;
 export const VILLAGE_SOURCES = ['import', 'zimmedar', 'district'] as const;
 /**
  * Why a Gaon from the official list sits in the District pool (CTO 13 Nov 2026): the District sees
@@ -82,6 +83,9 @@ const villageSchema = new Schema(
     addedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     approvedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     approvedAt: { type: Date },
+    rejectedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    rejectedAt: { type: Date },
+    rejectReason: { type: String, maxlength: 300 },
     /** Where the record came from: the official list import, a zimmedar, or the District. */
     source: {
       type: new Schema(

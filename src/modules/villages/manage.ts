@@ -8,6 +8,7 @@ import { connectDb } from '../../lib/db.js';
 import { AppError } from '../../lib/errors.js';
 import { assertInScope, districtPathOf, scopeFilter } from '../../lib/scope.js';
 import { looseVillageKey, villageNameKey } from '../../lib/text.js';
+import { Jadwal } from '../../models/jadwal.js';
 import { Unit } from '../../models/unit.js';
 import { User } from '../../models/user.js';
 import { Village, type VillageIssueKind } from '../../models/village.js';
@@ -90,6 +91,36 @@ export async function approveVillage(caller: AuthUser, id: string, name?: string
     targetId: String(village._id),
     unitPath: village.unitPath,
     details: { name: village.name, ...(from !== village.name ? { renamedFrom: from } : {}) },
+  });
+  return view(village);
+}
+
+/**
+ * POST /villages/:id/reject { reason } — a new Gaon added by mistake (CTO 28 Nov 2026): pending →
+ * rejected, never deleted; it leaves the zimmedar's and the Gaon lists. A Gaon already in a jadwal
+ * (draft or submitted) is not rejected: merge it into the right Gaon instead.
+ */
+export async function rejectVillage(caller: AuthUser, id: string, reason: string) {
+  const village = await villageInScope(caller, id);
+  if (village.status !== 'pending') throw new AppError(409, 'CONFLICT', 'Village is not pending');
+  if (await Jadwal.exists({ 'visits.villageId': village._id })) {
+    throw new AppError(409, 'CONFLICT', 'This village is in a jadwal; merge it instead', {
+      reason: 'VILLAGE_HAS_VISITS',
+    });
+  }
+  village.status = 'rejected';
+  village.rejectedBy = new Types.ObjectId(caller.id);
+  village.rejectedAt = new Date();
+  village.rejectReason = reason;
+  await village.save();
+  await audit({
+    action: 'VILLAGE_REJECT',
+    actorId: caller.id,
+    actorAjeerCode: caller.ajeerCode,
+    targetType: 'village',
+    targetId: String(village._id),
+    unitPath: village.unitPath,
+    details: { name: village.name, reason },
   });
   return view(village);
 }

@@ -471,3 +471,12 @@ when `personalKm` > 0). The day's `travel.km` and `totals.km` = meter end − me
 it. The Admin's correction (`POST /jadwals/:id/correct`) takes `travel.personalKm` too. The zimmedar
 app asks "was there personal travel today? yes / no" on the End screen of every bike day; the
 dashboard day view and both Excel files show the personal km.
+
+## Refusing a new Gaon added by mistake (CTO 28 Nov 2026)
+
+`POST /villages/:id/reject { reason }` (the Admin, like approve and merge; reason 5–300 chars) moves a
+**pending** Gaon to status `rejected`. Nothing is deleted. It leaves the pending list, the
+zimmedar's Gaon list and the dashboard Gaon list. It is audited as `VILLAGE_REJECT`, with the
+reason. A Gaon already in any jadwal (draft or submitted) is refused with 409 `VILLAGE_HAS_VISITS`;
+merge it into the right Gaon instead. The same name can be added again later. The village import
+never matches a rejected Gaon. An approved Gaon cannot be rejected.
